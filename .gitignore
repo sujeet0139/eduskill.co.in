@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Environment variables (DO NOT PUSH PASSWORDS TO GITHUB)
+.env
+.env.local
+.env.*.local
+
+# Uploaded files (local-disk dev only; production uses Cloudinary)
+uploads/
+
+# Vercel
+.vercel/
+
+# Logs / OS
+*.log
+.DS_Store
+
+# Internal planning/scratch docs — contain old plaintext credentials, NOT for publishing
+QUICK_START_EXECUTE_NOW.md
+MANUAL_SETUP_COMMANDS.md
+STUDENT_REGISTRATION_DEVELOPMENT_PROMPT.md
+promotdev.txt
+reference.txt
+deploy.bat
+deploy.sh
+deploy_vercel.py
+
+# Stray frontend fragments — belong in the separate Next.js frontend project
+*.jsx
