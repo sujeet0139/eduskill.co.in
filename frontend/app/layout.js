@@ -1,15 +1,24 @@
+import { Inter } from "next/font/google";
 import "./globals.css";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "eduskill.co.in — Skill Development & Certification",
+  title: "EduSkill.co.in — Internship & Skill Training for LNMU Students",
   description:
-    "Register, learn and get certified with eduskill.co.in. Courses, study materials and programs for students across Bihar.",
+    "Bihar's dedicated internship and skill training portal for LNMU affiliated college students. Register, learn and get certified.",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en">
+      <body className={inter.className}>
+        <Navbar />
+        <main>{children}</main>
+        <Footer />
+      </body>
     </html>
   );
 }
