@@ -62,6 +62,10 @@ app.use('/api/programs', programsRouter);
 const coursesRouter = require('./routes/courses');
 app.use('/api/courses', coursesRouter);
 
+// PROTECTED STUDENT ROUTES
+const studentDashboardRouter = require('./routes/student-dashboard');
+app.use('/api/student-dashboard', studentDashboardRouter);
+
 // PROTECTED ADMIN ROUTES (Require valid JWT Token)
 const assignmentsRouter = require('./routes/assignments');
 app.use('/api/assignments', requireAdmin, assignmentsRouter);

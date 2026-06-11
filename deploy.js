@@ -29,13 +29,13 @@ runCommand('node check-db.js');
 // 3. Deploy Backend (Express API)
 console.log('\n⚙️ Step 2: Deploying Backend API to Vercel...');
 // We use --prod to force a production deployment
-runCommand('npx vercel --prod');
+runCommand('npx vercel --prod --yes');
 
 // 4. Deploy Frontend (Next.js)
 console.log('\n🌐 Step 3: Deploying Frontend to Vercel...');
 const frontendPath = path.join(__dirname, 'frontend');
 // Navigate to frontend directory and deploy
-runCommand('npx vercel --prod', frontendPath);
+runCommand('npx vercel --prod --yes', frontendPath);
 
 console.log('\n✅ Deployment triggered successfully!');
 console.log('Please check your Vercel dashboard for the live build status.');
