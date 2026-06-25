@@ -16,7 +16,9 @@ async function request(path, { method = "GET", body, token, isForm } = {}) {
 
   let res;
   try {
-    res = await fetch(`${BASE}${path}`, { method, headers, body: payload });
+    // credentials: "include" sends/receives the httpOnly session cookie across
+    // the eduskill.co.in <-> api.eduskill.co.in boundary.
+    res = await fetch(`${BASE}${path}`, { method, headers, body: payload, credentials: "include" });
   } catch (e) {
     throw new Error("Cannot reach the server. Please try again later.");
   }
@@ -42,4 +44,5 @@ export const api = {
   put: (p, body, token) => request(p, { method: "PUT", body, token }),
   del: (p, token) => request(p, { method: "DELETE", token }),
   postForm: (p, formData, token) => request(p, { method: "POST", body: formData, token, isForm: true }),
+  putForm: (p, formData, token) => request(p, { method: "PUT", body: formData, token, isForm: true }),
 };

@@ -1,16 +1,16 @@
-const jwt = require('jsonwebtoken');
+const { jwt, JWT_SECRET, getTokenFromReq } = require('../config/jwt');
 
+// Protect student routes. Accepts the token from either the httpOnly session
+// cookie or an Authorization: Bearer header.
 const requireStudent = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = getTokenFromReq(req);
+
+  if (!token) {
     return res.status(401).json({ error: 'Unauthorized: Missing token' });
   }
 
-  const token = authHeader.split(' ')[1];
-  
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_secret_key_here_12345');
+    const decoded = jwt.verify(token, JWT_SECRET);
     if (decoded.role !== 'student') {
       return res.status(403).json({ error: 'Forbidden: Student access required' });
     }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { adminAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 
 // Only routes that have pages today. More (colleges, materials, certificates,
 // announcements, admins, settings) to be added later.
@@ -13,6 +14,7 @@ const NAV = [
   { href: "/admin/payments", label: "Payments" },
   { href: "/admin/courses", label: "Courses" },
   { href: "/admin/programs", label: "Programs" },
+  { href: "/admin/teachers", label: "Teachers" },
 ];
 
 export default function AdminLayout({ children }) {
@@ -39,7 +41,8 @@ export default function AdminLayout({ children }) {
   if (isLogin) return children;
   if (!ready) return null;
 
-  const logout = () => {
+  const logout = async () => {
+    try { await api.post("/api/auth/logout"); } catch {}
     adminAuth.logout();
     router.push("/admin/login");
   };

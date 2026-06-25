@@ -8,10 +8,33 @@ const rateLimit = require('express-rate-limit');
 
 dotenv.config();
 const { requireAdmin } = require('./middleware/authMiddleware');
+const pool = require('./config/db');
 const app = express();
 
 app.use(helmet({ crossOriginResourcePolicy: false })); // Secure HTTP headers
-app.use(cors());
+
+// CORS must allow credentials so the httpOnly session cookie flows between the
+// frontend (eduskill.co.in) and this API (api.eduskill.co.in). With credentials
+// enabled the origin can no longer be "*", so we echo only known origins.
+// Add extra origins via FRONTEND_URL (comma-separated) — e.g. Vercel previews.
+const ALLOWED_ORIGINS = (process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : [])
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .concat([
+    'https://eduskill.co.in',
+    'https://www.eduskill.co.in',
+    'http://localhost:3000',
+    'http://localhost:3003',
+  ]);
+
+app.use(cors({
+  origin(origin, cb) {
+    // Allow non-browser clients (curl, server-to-server) that send no Origin.
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -40,12 +63,22 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   }
 }));
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'Server running', time: new Date() });
+app.get('/health', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    await connection.query('SELECT 1');
+    connection.release();
+    res.json({ status: 'Server running', database: 'Connected', time: new Date() });
+  } catch (error) {
+    res.status(500).json({ status: 'Server running', database: 'Disconnected', error: error.message, time: new Date() });
+  }
 });
 
 const studentsRouter = require('./routes/students');
 app.use('/api/students', studentsRouter);
+
+const verifyRouter = require('./routes/verify');
+app.use('/api/verify', verifyRouter);
 
 const authRouter = require('./routes/auth');
 app.use('/api/auth', authRouter);
@@ -55,6 +88,9 @@ app.use('/api/payments', paymentsRouter);
 
 const materialsRouter = require('./routes/materials');
 app.use('/api/materials', materialsRouter);
+
+const publicApiRouter = require('./routes/public-api');
+app.use('/api/public', publicApiRouter);
 
 const programsRouter = require('./routes/programs');
 app.use('/api/programs', programsRouter);
@@ -88,6 +124,31 @@ app.use('/api/colleges', requireAdmin, collegesRouter);
 const adminsRouter = require('./routes/admins');
 app.use('/api/admins', requireAdmin, adminsRouter);
 
+const districtsRouter = require('./routes/districts');
+app.use('/api/districts', requireAdmin, districtsRouter);
+
+const departmentsRouter = require('./routes/departments');
+app.use('/api/departments', requireAdmin, departmentsRouter);
+
+const facultyRouter = require('./routes/faculty');
+app.use('/api/faculty', requireAdmin, facultyRouter);
+
+const liveClassesRouter = require('./routes/live-classes');
+app.use('/api/live-classes', requireAdmin, liveClassesRouter);
+
+const examsRouter = require('./routes/exams');
+app.use('/api/exams', requireAdmin, examsRouter);
+
+const heroSlidesRouter = require('./routes/hero-slides');
+app.use('/api/hero-slides', requireAdmin, heroSlidesRouter);
+
+const teachersRouter = require('./routes/teachers');
+app.use('/api/teachers', requireAdmin, teachersRouter);
+
+// Start the notification scheduler
+const notificationScheduler = require('./scripts/notification-scheduler');
+notificationScheduler.start();
+
 const PORT = process.env.PORT || 5000;
 
 // Only start a listener when run directly (local/VPS). On Vercel the platform
@@ -97,6 +158,7 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✓ Server running on http://localhost:${PORT}`);
     console.log(`✓ Database: ${process.env.DB_NAME}`);
+    console.log('✓ Notification scheduler is active.');
   });
 }
 

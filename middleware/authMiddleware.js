@@ -1,20 +1,17 @@
-const jwt = require('jsonwebtoken');
+const { jwt, JWT_SECRET, getTokenFromReq } = require('../config/jwt');
 
-// Middleware to protect Admin Routes
+// Middleware to protect Admin Routes. Accepts the token from either the
+// httpOnly session cookie or an Authorization: Bearer header.
 const requireAdmin = (req, res, next) => {
-  // Get token from the headers
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = getTokenFromReq(req);
+
+  if (!token) {
     return res.status(401).json({ error: 'Access denied. No token provided.' });
   }
 
-  const token = authHeader.split(' ')[1];
-
   try {
-    // Verify the token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_secret_key_here_12345');
-    
+    const decoded = jwt.verify(token, JWT_SECRET);
+
     // Check if the user role is an admin or moderator
     if (decoded.role !== 'admin' && decoded.role !== 'moderator') {
       return res.status(403).json({ error: 'Access denied. Requires admin privileges.' });
@@ -28,6 +25,20 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
-// You can add a similar middleware for students: `requireStudent`
+// Generic "is logged in" guard (any role). Used by /api/auth/me.
+const requireAuth = (req, res, next) => {
+  const token = getTokenFromReq(req);
 
-module.exports = { requireAdmin };
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid or expired token.' });
+  }
+};
+
+module.exports = { requireAdmin, requireAuth };
