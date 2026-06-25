@@ -3,14 +3,28 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
-import { StatusBadge } from "@/components/ui";
+import { StatusBadge, Input, Select, Button, Alert } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td } from "@/components/admin";
+
+// Fields the PUT /api/students/:id endpoint accepts.
+const blankEdit = {
+  name: "", email: "", phone: "", collegeId: "", department: "",
+  status: "registered", roll_number: "", current_year: 1, wallet_balance: 0,
+};
 
 export default function AdminStudents() {
   const [students, setStudents] = useState([]);
+  const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
+
+  // Edit modal state
+  const [editing, setEditing] = useState(null); // student being edited (or null)
+  const [form, setForm] = useState(blankEdit);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+
   const token = () => adminAuth.token();
 
   const load = () => {
@@ -21,7 +35,13 @@ export default function AdminStudents() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    // Colleges for the edit dropdown (best-effort).
+    api.get("/api/colleges", token())
+      .then((d) => setColleges(d.colleges || []))
+      .catch(() => {});
+  }, []);
 
   const verify = async (id) => {
     try { await api.put(`/api/students/${id}/verify`, {}, token()); load(); }
@@ -32,6 +52,41 @@ export default function AdminStudents() {
     if (!confirm("Delete this student? This cannot be undone.")) return;
     try { await api.del(`/api/students/${id}`, token()); load(); }
     catch (e) { alert(e.message); }
+  };
+
+  const openEdit = (s) => {
+    setEditError("");
+    setEditing(s);
+    setForm({
+      name: s.name || "",
+      email: s.email || "",
+      phone: s.phone || "",
+      collegeId: s.college_id || "",
+      department: s.department || "",
+      status: s.status || "registered",
+      roll_number: s.roll_number || "",
+      current_year: s.current_year || 1,
+      wallet_balance: s.wallet_balance || 0,
+    });
+  };
+
+  const closeEdit = () => { setEditing(null); setForm(blankEdit); setEditError(""); };
+
+  const change = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const save = async (e) => {
+    e.preventDefault();
+    setEditError("");
+    setSaving(true);
+    try {
+      await api.put(`/api/students/${editing.id}`, form, token());
+      closeEdit();
+      load();
+    } catch (err) {
+      setEditError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const filtered = students.filter((s) =>
@@ -75,6 +130,9 @@ export default function AdminStudents() {
               <Td><StatusBadge status={s.status} /></Td>
               <Td>
                 <div className="flex gap-2">
+                  <button onClick={() => openEdit(s)} className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-700 hover:bg-blue-200">
+                    Edit
+                  </button>
                   {s.status !== "verified" && (
                     <button onClick={() => verify(s.id)} className="rounded bg-green-600 px-2 py-1 text-xs text-white hover:bg-green-700">
                       Verify
@@ -89,6 +147,44 @@ export default function AdminStudents() {
           ))}
         </tbody>
       </TableWrap>
+
+      {/* EDIT STUDENT MODAL */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeEdit}>
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-gray-900">Edit Student</h2>
+              <button onClick={closeEdit} className="text-gray-400 hover:text-gray-700">✕</button>
+            </div>
+            <p className="mb-4 text-xs text-gray-500">Ref: <span className="font-mono">{editing.reference_no}</span></p>
+            <form onSubmit={save} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {editError && <div className="sm:col-span-2"><Alert type="error">{editError}</Alert></div>}
+              <Input label="Name" name="name" value={form.name} onChange={change} required />
+              <Input label="Email" type="email" name="email" value={form.email} onChange={change} required />
+              <Input label="Phone" name="phone" value={form.phone} onChange={change} required />
+              <Input label="Roll Number" name="roll_number" value={form.roll_number} onChange={change} />
+              <Input label="Department" name="department" value={form.department} onChange={change} />
+              <Input label="Current Year" type="number" name="current_year" value={form.current_year} onChange={change} min="1" max="6" />
+              <Select label="College" name="collegeId" value={form.collegeId} onChange={change}>
+                <option value="">— Select college —</option>
+                {colleges.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </Select>
+              <Select label="Status" name="status" value={form.status} onChange={change}>
+                <option value="registered">Registered</option>
+                <option value="verified">Verified</option>
+                <option value="completed">Completed</option>
+              </Select>
+              <Input label="Wallet Balance (₹)" type="number" step="0.01" name="wallet_balance" value={form.wallet_balance} onChange={change} />
+              <div className="flex justify-end gap-2 sm:col-span-2">
+                <button type="button" onClick={closeEdit} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                <Button type="submit" loading={saving}>Save Changes</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

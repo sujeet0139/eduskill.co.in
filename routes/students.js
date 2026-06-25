@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { sendWelcomeEmail } = require('../email');
+const { requireAdmin } = require('../middleware/authMiddleware');
 
 // STUDENT REGISTRATION ENDPOINT
 router.post('/register', async (req, res) => {
@@ -66,7 +67,7 @@ router.post('/register', async (req, res) => {
 });
 
 // GET ALL STUDENTS (ADMIN)
-router.get('/', async (req, res) => {
+router.get('/', requireAdmin, async (req, res) => {
   const { district, collegeId, status, paymentStatus } = req.query;
   try {
     const connection = await pool.getConnection();
@@ -107,7 +108,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET FULL STUDENT PROFILE (Basic, Financial, Learning, Internship)
-router.get('/:id/full-profile', async (req, res) => {
+router.get('/:id/full-profile', requireAdmin, async (req, res) => {
   const studentId = req.params.id;
   try {
     const connection = await pool.getConnection();
@@ -153,7 +154,7 @@ router.get('/:id/full-profile', async (req, res) => {
 });
 
 // UPDATE STUDENT
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   const { name, email, phone, collegeId, department, status, roll_number, current_year, wallet_balance } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -169,7 +170,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE STUDENT
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const connection = await pool.getConnection();
     await connection.query('DELETE FROM students WHERE id=?', [req.params.id]);
@@ -181,7 +182,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // VERIFY STUDENT
-router.put('/:id/verify', async (req, res) => {
+router.put('/:id/verify', requireAdmin, async (req, res) => {
   try {
     const connection = await pool.getConnection();
     await connection.query('UPDATE students SET status="verified" WHERE id=?', [req.params.id]);
@@ -193,7 +194,7 @@ router.put('/:id/verify', async (req, res) => {
 });
 
 // BULK VERIFY STUDENTS
-router.post('/bulk-verify', async (req, res) => {
+router.post('/bulk-verify', requireAdmin, async (req, res) => {
   const { ids } = req.body;
   if (!ids || !ids.length) return res.status(400).json({ error: 'No IDs provided' });
   try {
@@ -207,7 +208,7 @@ router.post('/bulk-verify', async (req, res) => {
 });
 
 // BULK IMPORT STUDENTS (CSV/JSON Array)
-router.post('/bulk-import', async (req, res) => {
+router.post('/bulk-import', requireAdmin, async (req, res) => {
   const { students } = req.body; // Expects array of objects
   
   if (!students || !Array.isArray(students)) {
