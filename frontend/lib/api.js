@@ -1,6 +1,6 @@
 // Central API client. Base URL comes from NEXT_PUBLIC_API_URL at build time;
 // falls back to the local backend for development.
-const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3003").replace(/\/$/, "");
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 async function request(path, { method = "GET", body, token, isForm } = {}) {
   const headers = {};
