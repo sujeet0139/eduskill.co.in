@@ -31,4 +31,71 @@ async function sendWelcomeEmail(studentEmail, studentName, referenceNo) {
   }
 }
 
-module.exports = { sendWelcomeEmail };
+async function sendClassReminderEmail(studentEmail, studentName, classDetails) {
+  try {
+    const scheduledTime = new Date(classDetails.scheduled_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const info = await transporter.sendMail({
+      from: `"EduSkill" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      to: studentEmail,
+      subject: `Class Reminder: ${classDetails.title}`,
+      html: `
+        <h2>Hi ${studentName},</h2>
+        <p>This is a reminder for your upcoming live class.</p>
+        <p><strong>Class:</strong> ${classDetails.title}</p>
+        <p><strong>Topic:</strong> ${classDetails.topic || 'N/A'}</p>
+        <p><strong>Scheduled for:</strong> ${scheduledTime}</p>
+        <p><strong>Meeting Link:</strong> <a href="${classDetails.meet_link}">${classDetails.meet_link}</a></p>
+        <br/>
+        <p>Please be ready to join on time.</p>
+        <p>Best Regards,<br/>The EduSkill Team</p>
+      `,
+    });
+    console.log(`Class reminder email sent to ${studentEmail}: %s`, info.messageId);
+  } catch (error) {
+    console.error(`Error sending class reminder to ${studentEmail}:`, error);
+  }
+}
+
+async function sendClassMaterialsEmail(studentEmail, studentName, classDetails) {
+  try {
+    const info = await transporter.sendMail({
+      from: `"EduSkill" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      to: studentEmail,
+      subject: `Recording & Materials for: ${classDetails.title}`,
+      html: `
+        <h2>Hi ${studentName},</h2>
+        <p>The recording and materials for the class "<strong>${classDetails.title}</strong>" are now available.</p>
+        ${classDetails.recording_url ? `<p><strong>Watch Recording:</strong> <a href="${classDetails.recording_url}">${classDetails.recording_url}</a></p>` : ''}
+        ${classDetails.materials_url ? `<p><strong>Download Materials:</strong> <a href="${classDetails.materials_url}">${classDetails.materials_url}</a></p>` : ''}
+        <br/>
+        <p>Happy learning!</p>
+        <p>Best Regards,<br/>The EduSkill Team</p>
+      `,
+    });
+    console.log(`Class materials email sent to ${studentEmail}: %s`, info.messageId);
+  } catch (error) {
+    console.error(`Error sending class materials to ${studentEmail}:`, error);
+  }
+}
+
+async function sendPaymentConfirmationEmail(studentEmail, studentName, paymentDetails) {
+  try {
+    const info = await transporter.sendMail({
+      from: `"EduSkill" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      to: studentEmail,
+      subject: "Payment Confirmation - EduSkill",
+      html: `
+        <h2>Hi ${studentName},</h2>
+        <p>We have successfully received your payment of <strong>₹${paymentDetails.amount}</strong>.</p>
+        <p>Your enrollment for the ${paymentDetails.payment_for_type} is now confirmed.</p>
+        <br/>
+        <p>Best Regards,<br/>The EduSkill Team</p>
+      `,
+    });
+    console.log("Payment confirmation email sent successfully: %s", info.messageId);
+  } catch (error) {
+    console.error("Error sending payment confirmation email:", error);
+  }
+}
+
+module.exports = { sendWelcomeEmail, sendClassReminderEmail, sendClassMaterialsEmail, sendPaymentConfirmationEmail };

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Navbar from "@/components/Navbar";
 import { api } from "@/lib/api";
 import { studentAuth } from "@/lib/auth";
 import { Alert, Button, Card, Input } from "@/components/ui";
@@ -33,7 +32,6 @@ export default function StudentLoginPage() {
 
   return (
     <>
-      <Navbar />
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-16">
         <Card>
           <h1 className="text-2xl font-bold text-gray-900">Student Login</h1>

@@ -6,7 +6,12 @@ const pool = require('../config/db');
 router.get('/', async (req, res) => {
   try {
     const connection = await pool.getConnection();
-    const [colleges] = await connection.query('SELECT * FROM colleges ORDER BY name ASC');
+    const [colleges] = await connection.query(`
+      SELECT c.*, d.name as district_name 
+      FROM colleges c 
+      LEFT JOIN districts d ON c.district_id = d.id 
+      ORDER BY c.name ASC
+    `);
     connection.release();
     res.json({ success: true, colleges });
   } catch (error) {
@@ -14,14 +19,29 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET COLLEGE BY ID
+router.get('/:id', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [colleges] = await connection.query('SELECT * FROM colleges WHERE id = ?', [req.params.id]);
+    connection.release();
+    if (colleges.length === 0) {
+      return res.status(404).json({ error: 'College not found' });
+    }
+    res.json({ success: true, college: colleges[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // CREATE NEW COLLEGE
 router.post('/', async (req, res) => {
-  const { name, district, state } = req.body;
+  const { name, college_code, district_id, state, address, contact_no, principal_details } = req.body;
   try {
     const connection = await pool.getConnection();
     await connection.query(
-      'INSERT INTO colleges (name, district, state) VALUES (?, ?, ?)',
-      [name, district, state || 'Bihar']
+      'INSERT INTO colleges (name, college_code, district_id, state, address, contact_no, principal_details) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, college_code, district_id || null, state || 'Bihar', address, contact_no, principal_details]
     );
     connection.release();
     res.json({ success: true, message: 'College added successfully' });
@@ -32,12 +52,12 @@ router.post('/', async (req, res) => {
 
 // UPDATE COLLEGE
 router.put('/:id', async (req, res) => {
-  const { name, district, state } = req.body;
+  const { name, college_code, district_id, state, address, contact_no, principal_details } = req.body;
   try {
     const connection = await pool.getConnection();
     await connection.query(
-      'UPDATE colleges SET name=?, district=?, state=? WHERE id=?',
-      [name, district, state, req.params.id]
+      'UPDATE colleges SET name=?, college_code=?, district_id=?, state=?, address=?, contact_no=?, principal_details=? WHERE id=?',
+      [name, college_code, district_id || null, state, address, contact_no, principal_details, req.params.id]
     );
     connection.release();
     res.json({ success: true, message: 'College updated successfully' });

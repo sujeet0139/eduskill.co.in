@@ -29,3 +29,4 @@ deploy_vercel.py
 # Stray frontend fragments dumped in the backend root — belong in the Next.js app.
 # Anchored to root only so real components under frontend/ stay tracked.
 /*.jsx
+.vercel
