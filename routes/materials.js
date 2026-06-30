@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { requireAdmin } = require('../middleware/authMiddleware');
 
 // Study-material uploads (image/PDF/Word, 10 MB). Cloudinary in production,
 // local disk in development. See config/storage.js.
@@ -14,8 +15,8 @@ const upload = makeUpload({
 });
 
 // ADMIN: UPLOAD STUDY MATERIAL
-router.post('/upload', upload.single('document'), async (req, res) => {
-  const { title, description } = req.body;
+router.post('/upload', requireAdmin, upload.single('document'), async (req, res) => {
+  const { title, description, category } = req.body;
   const filePath = fileUrl(req.file);
 
   try {
@@ -23,8 +24,8 @@ router.post('/upload', upload.single('document'), async (req, res) => {
 
     const connection = await pool.getConnection();
     await connection.query(
-      'INSERT INTO study_materials (title, description, file_path) VALUES (?, ?, ?)',
-      [title, description, filePath]
+      'INSERT INTO study_materials (title, description, category, file_path) VALUES (?, ?, ?, ?)',
+      [title, description || null, category || null, filePath]
     );
     connection.release();
 
@@ -34,7 +35,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
   }
 });
 
-// PUBLIC/STUDENT: GET ALL STUDY MATERIALS
+// PUBLIC/STUDENT: GET ACTIVE STUDY MATERIALS
 router.get('/', async (req, res) => {
   try {
     const connection = await pool.getConnection();
@@ -46,11 +47,60 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ADMIN: GET ALL STUDY MATERIALS (including disabled)
+router.get('/all', requireAdmin, async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [materials] = await connection.query('SELECT * FROM study_materials ORDER BY created_at DESC');
+    connection.release();
+    res.json({ success: true, materials });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: TOGGLE ACTIVE / UPDATE METADATA
+router.put('/:id', requireAdmin, async (req, res) => {
+  const { title, description, category, is_active } = req.body;
+  try {
+    const connection = await pool.getConnection();
+    const [[existing]] = await connection.query('SELECT * FROM study_materials WHERE id = ?', [req.params.id]);
+    if (!existing) {
+      connection.release();
+      return res.status(404).json({ error: 'Material not found' });
+    }
+    await connection.query(
+      'UPDATE study_materials SET title = ?, description = ?, category = ?, is_active = ? WHERE id = ?',
+      [
+        title ?? existing.title,
+        description ?? existing.description,
+        category ?? existing.category,
+        is_active !== undefined ? (is_active ? 1 : 0) : existing.is_active,
+        req.params.id,
+      ]
+    );
+    connection.release();
+    res.json({ success: true, message: 'Study material updated' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: DELETE STUDY MATERIAL
+router.delete('/:id', requireAdmin, async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    await connection.query('DELETE FROM study_materials WHERE id = ?', [req.params.id]);
+    connection.release();
+    res.json({ success: true, message: 'Study material deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ADMIN: GENERATE CONSENT LETTER (Stub for future frontend integration)
-router.post('/consent-letter', async (req, res) => {
+router.post('/consent-letter', requireAdmin, async (req, res) => {
   const { studentId, collegeId } = req.body;
-  // Logic to dynamically generate a PDF or HTML template for a consent letter goes here.
-  // For now, we return a success response to the admin panel.
   res.json({ success: true, message: 'Consent letter issued', data: { studentId, collegeId, date: new Date() } });
 });
 

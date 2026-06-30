@@ -2,31 +2,37 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { sendWelcomeEmail } = require('../email');
+const bcrypt = require('bcryptjs');
 const { requireAdmin } = require('../middleware/authMiddleware');
 
 // STUDENT REGISTRATION ENDPOINT
 router.post('/register', async (req, res) => {
-  const { name, email, phone, collegeId, department, aadhar, pan, roll_number, current_year } = req.body;
-  
+  const studentData = req.body;
+
   try {
-    if (!name || !email || !phone || !collegeId) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-
-    const phoneDigits = phone.replace(/\D/g, '');
-    if (phoneDigits.length !== 10) {
-      return res.status(400).json({ error: 'Phone must be 10 digits' });
-    }
-
     const connection = await pool.getConnection();
+
+    // Fetch dynamic field validation rules
+    const [fields] = await connection.query('SELECT * FROM registration_fields WHERE is_enabled = TRUE');
+
+    // Dynamic Validation
+    for (const field of fields) {
+      if (field.is_mandatory && !studentData[field.field_name]) {
+        connection.release();
+        return res.status(400).json({ error: `${field.label} is a required field.` });
+      }
+      if (field.field_name === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(studentData.email)) {
+        connection.release();
+        return res.status(400).json({ error: 'Invalid email format.' });
+      }
+      if (field.field_name === 'password' && (!studentData.password || studentData.password.length < 6)) {
+        connection.release();
+        return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+      }
+    }
     const [existingEmail] = await connection.query(
       'SELECT id FROM students WHERE email = ?',
-      [email]
+      [studentData.email]
     );
 
     if (existingEmail.length > 0) {
@@ -34,19 +40,41 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
+    // Generate Enrollment ID (e.g., ENR240001)
+    const currentYear = new Date().getFullYear().toString().slice(-2);
+    const [[lastStudent]] = await connection.query("SELECT id FROM students ORDER BY id DESC LIMIT 1");
+    const nextId = (lastStudent ? lastStudent.id : 0) + 1;
+    const enrollmentId = `ENR${currentYear}${String(nextId).padStart(4, '0')}`;
+
     const referenceNo = 'SKC' + Date.now();
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(studentData.password, salt);
+
+    // Separate standard and custom fields
+    const standardFields = fields.filter(f => f.is_standard).map(f => f.field_name);
+    const customFields = fields.filter(f => !f.is_standard);
 
     const [result] = await connection.query(
-      'INSERT INTO students (reference_no, name, email, phone, aadhar, pan, roll_number, current_year, college_id, department, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [referenceNo, name, email, phone, aadhar || null, pan || null, roll_number || null, current_year || 1, collegeId, department, 'registered']
+      `INSERT INTO students (enrollment_id, reference_no, name, email, password_hash, phone, aadhar, pan, roll_number, current_year, college_id, department, status) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [enrollmentId, referenceNo, studentData.name, studentData.email, passwordHash, studentData.phone, studentData.aadhar || null, studentData.pan || null, studentData.roll_number || null, studentData.current_year || 1, studentData.collegeId, studentData.department, 'registered']
     );
+    const studentId = result.insertId;
 
+    // Insert custom field data into the new table
+    for (const customField of customFields) {
+      const value = studentData[customField.field_name];
+      if (value) {
+        await connection.query('INSERT INTO student_custom_fields (student_id, field_id, value) VALUES (?, ?, ?)', [studentId, customField.id, value]);
+      }
+    }
+    
     connection.release();
 
     // SEND CONFIRMATION EMAIL
     try {
       // Use the centralized email function
-      await sendWelcomeEmail(email, name, referenceNo);
+      await sendWelcomeEmail(studentData.email, studentData.name, referenceNo);
     } catch (emailErr) {
       console.error('Email sending failed:', emailErr);
       // We log the error but don't fail the whole registration if email fails
@@ -56,8 +84,9 @@ router.post('/register', async (req, res) => {
       success: true,
       message: 'Registration successful',
       referenceNo: referenceNo,
-      studentId: result.insertId,
-      email: email
+      enrollmentId: enrollmentId,
+      studentId: studentId,
+      email: studentData.email
     });
 
   } catch (error) {
@@ -107,6 +136,82 @@ router.get('/', requireAdmin, async (req, res) => {
   }
 });
 
+// EXPORT STUDENTS AS CSV
+router.get('/export', requireAdmin, async (req, res) => {
+  const { q, status, collegeId } = req.query;
+  try {
+    const connection = await pool.getConnection();
+    let query = `
+      SELECT s.id, s.enrollment_id, s.reference_no, s.name, s.email, s.phone, c.name as college_name, s.status, s.created_at
+      FROM students s
+      LEFT JOIN colleges c ON s.college_id = c.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+      query += ' AND s.status = ?';
+      params.push(status);
+    }
+
+    if (collegeId) {
+      query += ' AND s.college_id = ?';
+      params.push(collegeId);
+    }
+
+    if (q) {
+      const like = `%${q}%`;
+      query += ` AND (
+        s.name LIKE ? OR
+        s.email LIKE ? OR
+        s.reference_no LIKE ? OR
+        s.phone LIKE ? OR
+        c.name LIKE ?
+      )`;
+      params.push(like, like, like, like, like);
+    }
+
+    query += ' ORDER BY s.created_at DESC';
+    const [students] = await connection.query(query, params);
+    connection.release();
+
+    const csvRows = [
+      [
+        'Student ID',
+        'Enrollment ID',
+        'Reference No',
+        'Name',
+        'Email',
+        'Phone',
+        'College',
+        'Status',
+        'Created At',
+      ].join(','),
+    ];
+
+    students.forEach((student) => {
+      csvRows.push([
+        student.id,
+        student.enrollment_id || '',
+        student.reference_no || '',
+        `"${(student.name || '').replace(/"/g, '""')}"`,
+        student.email || '',
+        student.phone || '',
+        `"${(student.college_name || '').replace(/"/g, '""')}"`,
+        student.status || '',
+        student.created_at ? student.created_at.toISOString() : '',
+      ].join(','));
+    });
+
+    const csvData = csvRows.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="eduskill-students-${new Date().toISOString().slice(0,10)}.csv"`);
+    res.send(csvData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET FULL STUDENT PROFILE (Basic, Financial, Learning, Internship)
 router.get('/:id/full-profile', requireAdmin, async (req, res) => {
   const studentId = req.params.id;
@@ -132,7 +237,14 @@ router.get('/:id/full-profile', requireAdmin, async (req, res) => {
     const [courses] = await connection.query(`SELECT sc.*, c.title FROM student_courses sc JOIN courses c ON sc.course_id = c.id WHERE sc.student_id = ?`, [studentId]);
     const [[attendance]] = await connection.query(`SELECT COUNT(*) as attended_classes FROM class_attendance WHERE student_id = ? AND status = 'present'`, [studentId]);
     const [assignments] = await connection.query(`SELECT * FROM assignment_submissions WHERE student_id = ?`, [studentId]);
+    const [documents] = await connection.query(`SELECT * FROM student_documents WHERE student_id = ?`, [studentId]);
     const [certificates] = await connection.query(`SELECT * FROM certificates WHERE student_id = ?`, [studentId]);
+    const [customFields] = await connection.query(`
+      SELECT rf.label, rf.field_name, scf.value 
+      FROM student_custom_fields scf 
+      JOIN registration_fields rf ON scf.field_id = rf.id 
+      WHERE scf.student_id = ?`, [studentId]
+    );
 
     // Internships
     const [internships] = await connection.query(`SELECT sp.*, p.title as program_title FROM student_programs sp JOIN programs p ON sp.program_id = p.id WHERE sp.student_id = ?`, [studentId]);
@@ -144,12 +256,86 @@ router.get('/:id/full-profile', requireAdmin, async (req, res) => {
       profile: {
         basic,
         financial: { wallet_balance: basic.wallet_balance, total_paid: financial.total_paid || 0, payments },
-        learning: { courses, attended_classes: attendance.attended_classes, assignments, certificates },
+        learning: { courses, attended_classes: attendance.attended_classes, assignments, certificates, documents, customFields },
         internships
       }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/students/:id/id-card - Data for generating a student ID card
+router.get('/:id/id-card', requireAdmin, async (req, res) => {
+  const studentId = req.params.id;
+  try {
+    const connection = await pool.getConnection();
+    const [[student]] = await connection.query(`
+      SELECT 
+        s.name, s.enrollment_id, s.dob, s.father_name, s.phone, s.address_permanent,
+        c.name as college_name,
+        (SELECT file_url FROM student_documents WHERE student_id = s.id AND document_type = 'photo' AND status = 'verified' LIMIT 1) as photo_url,
+        (SELECT file_url FROM student_documents WHERE student_id = s.id AND document_type = 'signature' AND status = 'verified' LIMIT 1) as signature_url
+      FROM students s
+      LEFT JOIN colleges c ON s.college_id = c.id
+      WHERE s.id = ?
+    `, [studentId]);
+    connection.release();
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    res.json({ success: true, idCardData: student });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// STUDENT: UPLOAD A DOCUMENT
+const docUpload = require('../config/storage').makeUpload({
+  folder: 'eduskill/documents',
+  prefix: 'doc-',
+  maxSize: 5 * 1024 * 1024, // 5MB limit
+  allowedExt: /jpeg|jpg|png|pdf/,
+  allowedMime: ['image/jpeg', 'image/png', 'application/pdf']
+});
+
+router.post('/upload-document', docUpload.single('document'), async (req, res) => {
+  const { student_id, document_type } = req.body;
+  const file = req.file;
+
+  if (!student_id || !document_type || !file) {
+    return res.status(400).json({ error: 'Student ID, document type, and a file are required.' });
+  }
+
+  try {
+    const connection = await pool.getConnection();
+    const fileUrl = require('../config/storage').fileUrl(file);
+    await connection.query('INSERT INTO student_documents (student_id, document_type, file_url, file_name) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE file_url = VALUES(file_url), file_name = VALUES(file_name), status = "pending_verification"', [student_id, document_type, fileUrl, file.originalname]);
+    connection.release();
+    res.json({ success: true, message: 'Document uploaded successfully. It will be reviewed by our team.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Document upload failed', message: error.message });
+  }
+});
+
+// ADMIN: UPDATE DOCUMENT STATUS
+router.put('/documents/:docId/status', requireAdmin, async (req, res) => {
+  const { status, notes } = req.body;
+  const { docId } = req.params;
+
+  if (!['verified', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status provided.' });
+  }
+
+  try {
+    const connection = await pool.getConnection();
+    await connection.query('UPDATE student_documents SET status = ?, notes = ? WHERE id = ?', [status, notes || null, docId]);
+    connection.release();
+    res.json({ success: true, message: `Document status updated to ${status}.` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update document status', message: error.message });
   }
 });
 

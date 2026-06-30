@@ -1,0 +1,103 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../config/db');
+const { requireAdmin } = require('../middleware/authMiddleware');
+
+// GET ALL REGISTRATION FIELDS
+router.get('/registration', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [fields] = await connection.query('SELECT * FROM registration_fields ORDER BY order_no ASC');
+    connection.release();
+    res.json({ success: true, fields });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// CREATE A NEW CUSTOM FIELD
+router.post('/registration', requireAdmin, async (req, res) => {
+  const { label, type, is_mandatory, options } = req.body;
+  if (!label || !type) {
+    return res.status(400).json({ error: 'Label and type are required.' });
+  }
+
+  // Normalise options for "select" fields into a clean JSON array of strings.
+  let optionsJson = null;
+  if (type === 'select') {
+    const list = Array.isArray(options)
+      ? options
+      : String(options || '').split(/\r?\n|,/);
+    const cleaned = list.map((o) => String(o).trim()).filter(Boolean);
+    if (cleaned.length === 0) {
+      return res.status(400).json({ error: 'A dropdown (select) field needs at least one option.' });
+    }
+    optionsJson = JSON.stringify(cleaned);
+  }
+
+  // Generate a unique field_name from the label
+  const field_name = `custom_${label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
+
+  try {
+    const connection = await pool.getConnection();
+    await connection.query(
+      `INSERT INTO registration_fields (field_name, label, type, is_standard, is_enabled, is_mandatory, options)
+       VALUES (?, ?, ?, FALSE, TRUE, ?, ?)`,
+      [field_name, label, type, is_mandatory || false, optionsJson]
+    );
+    connection.release();
+    res.status(201).json({ success: true, message: 'Custom field created successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create custom field', message: error.message });
+  }
+});
+
+// BULK UPDATE REGISTRATION FIELDS
+router.put('/registration', requireAdmin, async (req, res) => {
+  const { fields } = req.body; // Expects an array of field objects
+  if (!Array.isArray(fields)) {
+    return res.status(400).json({ error: 'Invalid payload. Expected an array of fields.' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    for (const field of fields) {
+      await connection.query(
+        'UPDATE registration_fields SET label = ?, is_enabled = ?, is_mandatory = ? WHERE id = ?',
+        [field.label, field.is_enabled, field.is_mandatory, field.id]
+      );
+    }
+
+    await connection.commit();
+    connection.release();
+    res.json({ success: true, message: 'Registration form settings updated successfully.' });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    res.status(500).json({ error: 'Failed to update settings', message: error.message });
+  }
+});
+
+// DELETE A CUSTOM FIELD
+router.delete('/registration/:id', requireAdmin, async (req, res) => {
+  const fieldId = req.params.id;
+  try {
+    const connection = await pool.getConnection();
+    // Important: Only allow deleting non-standard fields to protect the system
+    const [result] = await connection.query(
+      'DELETE FROM registration_fields WHERE id = ? AND is_standard = FALSE',
+      [fieldId]
+    );
+    connection.release();
+    if (result.affectedRows === 0) {
+      return res.status(403).json({ error: 'Cannot delete a standard field or field not found.' });
+    }
+    res.json({ success: true, message: 'Custom field deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete custom field', message: error.message });
+  }
+});
+
+module.exports = router;

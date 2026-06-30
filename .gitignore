@@ -16,6 +16,10 @@ uploads/
 *.log
 .DS_Store
 
+# Python cache
+__pycache__/
+*.pyc
+
 # Internal planning/scratch docs — contain old plaintext credentials, NOT for publishing
 QUICK_START_EXECUTE_NOW.md
 MANUAL_SETUP_COMMANDS.md

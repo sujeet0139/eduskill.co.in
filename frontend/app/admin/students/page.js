@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { StatusBadge, Input, Select, Button, Alert } from "@/components/ui";
@@ -18,6 +19,7 @@ export default function AdminStudents() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   // Edit modal state
   const [editing, setEditing] = useState(null); // student being edited (or null)
@@ -52,6 +54,41 @@ export default function AdminStudents() {
     if (!confirm("Delete this student? This cannot be undone.")) return;
     try { await api.del(`/api/students/${id}`, token()); load(); }
     catch (e) { alert(e.message); }
+  };
+
+  const exportStudents = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      const res = await fetch(`${api.base}/api/students/export?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token()}`,
+        },
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Export failed with status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `eduskill-students-${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(`Export failed: ${err.message}`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const openEdit = (s) => {
@@ -99,12 +136,17 @@ export default function AdminStudents() {
         title="Students"
         subtitle={`${students.length} registered`}
         action={
-          <input
-            placeholder="Search…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              placeholder="Search…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
+            />
+            <Button onClick={exportStudents} loading={exporting} className="whitespace-nowrap">
+              Export CSV
+            </Button>
+          </div>
         }
       />
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
@@ -112,7 +154,7 @@ export default function AdminStudents() {
       <TableWrap>
         <thead className="bg-gray-50">
           <tr>
-            <Th>Ref</Th><Th>Name</Th><Th>Email</Th><Th>Phone</Th><Th>College</Th><Th>Status</Th><Th>Actions</Th>
+            <Th>Enroll ID</Th><Th>Ref</Th><Th>Name</Th><Th>Email</Th><Th>Phone</Th><Th>College</Th><Th>Status</Th><Th>Actions</Th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -122,8 +164,13 @@ export default function AdminStudents() {
             <tr><Td className="text-gray-500">No students found.</Td></tr>
           ) : filtered.map((s) => (
             <tr key={s.id} className="hover:bg-gray-50">
+              <Td className="font-mono text-xs">{s.enrollment_id || s.reference_no}</Td>
               <Td className="font-mono text-xs">{s.reference_no}</Td>
-              <Td className="font-medium">{s.name}</Td>
+              <Td className="font-medium">
+                <Link href={`/admin/students/${s.id}`} className="text-brand hover:underline">
+                  {s.name}
+                </Link>
+              </Td>
               <Td>{s.email}</Td>
               <Td>{s.phone}</Td>
               <Td className="max-w-[180px] truncate" >{s.college_name}</Td>

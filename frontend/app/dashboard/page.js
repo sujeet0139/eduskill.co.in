@@ -1,231 +1,198 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
-import { studentAuth } from "@/lib/auth";
-import { Alert, Button, Card, Input, StatusBadge } from "@/components/ui";
-import { FileDown, BookOpen, GraduationCap, CreditCard, LogOut, CheckCircle, XCircle } from "lucide-react";
+import { adminAuth } from "@/lib/auth";
+import { Button, Card, StatusBadge, Alert } from "@/components/ui";
+import { PageHeader, TableWrap, Th, Td } from "@/components/admin";
+import { User, GraduationCap, Banknote, BookOpen, FileText, Briefcase } from "lucide-react";
 
-function fileHref(path) {
-  if (!path) return "#";
-  return /^https?:\/\//.test(path) ? path : `${api.base}${path}`;
-}
+const DetailItem = ({ label, value, children }) => (
+  <div>
+    <p className="text-xs text-gray-500">{label}</p>
+    <div className="text-sm font-medium text-gray-800">{children || value || "—"}</div>
+  </div>
+);
 
-export default function StudentDashboard() {
-  const router = useRouter();
-  const [student, setStudent] = useState(null);
-  const [payment, setPayment] = useState(null);
-  const [materials, setMaterials] = useState([]);
-  const [courses, setCourses] = useState([]);
-  const [pay, setPay] = useState({ transactionId: "", amount: "1000", file: null });
-  const [msg, setMsg] = useState({ type: "", text: "" });
-  const [paymentMsg, setPaymentMsg] = useState({ type: "", text: "" });
-  const [uploading, setUploading] = useState(false);
+export default function StudentProfilePage() {
+  const params = useParams();
+  const studentId = params.id;
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState("profile");
 
-  useEffect(() => {
-    const s = studentAuth.student();
-    if (!s) {
-      router.replace("/login");
-      return;
-    }
-    setStudent(s);
-    // Fetch all data in parallel for faster loading
-    Promise.all([
-      api.get(`/api/student-dashboard/profile`, studentAuth.token()), // Correct endpoint to get student status
-      api.get("/api/materials"),
-      api.get("/api/courses"),
-    ]).then(([profileData, materialsData, coursesData]) => {
-      // The student status is on the profile object, not a separate payment status call
-      setStudent(profileData.profile); // Update student with latest data from API
-      setMaterials(materialsData.materials || []);
-      setCourses(coursesData.courses || []);
-    }).catch(err => setMsg({ type: "error", text: "Failed to load dashboard data. " + err.message }));
-  }, [router]);
+  const token = () => adminAuth.token();
 
-  const logout = async () => {
-    try { await api.post("/api/auth/logout"); } catch {}
-    studentAuth.logout();
-    router.push("/");
+  const loadProfile = () => {
+    if (!studentId) return;
+    setLoading(true);
+    api.get(`/api/students/${studentId}/full-profile`, token())
+      .then(res => setProfile(res.profile))
+      .catch(err => setError("Failed to load student profile: " + err.message))
+      .finally(() => setLoading(false));
   };
 
-  const uploadPayment = async (e) => {
-    e.preventDefault();
-    setPaymentMsg({ type: "", text: "" });
-    if (!pay.file) {
-      setPaymentMsg({ type: "error", text: "Please choose a screenshot to upload." });
-      return;
-    }
-    setUploading(true);
+  useEffect(loadProfile, [studentId]);
+
+  const verifyStudent = async () => {
+    if (!confirm("Are you sure you want to mark this student as verified?")) return;
     try {
-      // Step 1: Initiate a payment record to get a payment ID.
-      // We'll mark this as a 'registration' payment for now.
-      const initRes = await api.post("/api/payments/initiate", {
-        student_id: student.id,
-        item_type: 'registration', // This is a general admission payment
-        amount: pay.amount,
-      });
-
-      if (!initRes.payment_id) {
-        throw new Error("Failed to create a payment record.");
-      }
-
-      // Step 2: Upload the screenshot against the new payment ID.
-      const fd = new FormData();
-      fd.append("transactionId", pay.transactionId);
-      fd.append("screenshot", pay.file);
-      await api.postForm(`/api/payments/${initRes.payment_id}/upload-proof`, fd);
-
-      setPaymentMsg({ type: "success", text: "Payment screenshot uploaded. Awaiting verification." });
-      // Refresh the entire student profile to get the latest payment and admission status.
-      // This also helps update the payment status card.
-      api.get(`/api/student-dashboard/profile`, studentAuth.token()).then(profileData => {
-        setStudent(profileData.profile);
-      });
-      setPay({ transactionId: "", amount: "1000", file: null });
+      await api.put(`/api/students/${studentId}/verify`, {}, token());
+      loadProfile(); // Refresh profile to show new status
     } catch (err) {
-      setPaymentMsg({ type: "error", text: err.message });
-    } finally {
-      setUploading(false);
+      alert("Verification failed: " + err.message);
     }
   };
 
-  if (!student) return null;
+  if (loading) return <div className="p-6">Loading student profile...</div>;
+  if (error) return <Alert type="error">{error}</Alert>;
+  if (!profile) return <Alert type="error">Student not found.</Alert>;
+
+  const { basic, financial, learning, internships } = profile;
+
+  const TABS = [
+    { id: "profile", label: "Profile", icon: User },
+    { id: "payments", label: "Payments", icon: Banknote },
+    { id: "courses", label: "Courses", icon: BookOpen },
+    { id: "documents", label: "Documents", icon: FileText },
+  ];
 
   return (
     <>
-      {/* The <Navbar /> is removed from here and now only exists in the root layout */}
-      <main className="min-h-screen bg-gray-50/50">
-        <div className="mx-auto w-full max-w-6xl px-4 py-8">
-          {/* -- HEADER -- */}
-          <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Welcome, {student.name}</h1>
-              <p className="mt-1 text-sm text-gray-500">Ref: {student.reference_no} · {student.email}</p>
-            </div>
-            <button onClick={logout} className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-500 shadow-sm ring-1 ring-inset ring-gray-200 hover:bg-gray-50 hover:text-red-600">
-              <LogOut size={16} /> Logout
+      <PageHeader
+        title={basic.name}
+        subtitle={`Enrollment ID: ${basic.enrollment_id} | ${basic.college_name}`}
+        action={
+          <div className="flex gap-2">
+            {basic.status !== 'verified' && <Button onClick={verifyStudent}>Verify Student</Button>}
+            <Link href={`/admin/students/${studentId}/id-card`}>
+              <Button className="bg-gray-600 hover:bg-gray-700">View ID Card</Button>
+            </Link>
+          </div>
+        }
+      />
+
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="-mb-px flex space-x-6">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium ${
+                activeTab === tab.id
+                  ? "border-brand text-brand"
+                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+              }`}
+            >
+              <tab.icon size={16} /> {tab.label}
             </button>
-          </div>
+          ))}
+        </nav>
+      </div>
 
-          {msg.text && <div className="mb-6"><Alert type={msg.type}>{msg.text}</Alert></div>}
+      {/* TAB CONTENT */}
+      <div className="space-y-6">
+        {activeTab === 'profile' && (
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">Basic Information</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <DetailItem label="Full Name" value={basic.name} />
+              <DetailItem label="Email" value={basic.email} />
+              <DetailItem label="Phone" value={basic.phone} />
+              <DetailItem label="Admission Status"><StatusBadge status={basic.status} /></DetailItem>
+              <DetailItem label="College" value={basic.college_name} />
+              <DetailItem label="District" value={basic.district_name} />
+              <DetailItem label="Father's Name" value={basic.father_name} />
+              <DetailItem label="Parent's Phone" value={basic.parent_phone} />
+              <DetailItem label="Aadhaar" value={basic.aadhar} />
+              <DetailItem label="PAN" value={basic.pan} />
+              <DetailItem label="Roll Number" value={basic.roll_number} />
+              <DetailItem label="Registered On" value={new Date(basic.created_at).toLocaleDateString()} />
+            </div>
+            <div className="mt-4 pt-4 border-t">
+              <DetailItem label="Permanent Address" value={basic.address_permanent} />
+            </div>
+          </Card>
+        )}
 
-          {/* -- OVERVIEW STATS -- */}
-          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Card className="flex items-center gap-4 p-4">
-              <div className="rounded-full bg-blue-100 p-3 text-blue-600"><GraduationCap size={24} /></div>
-              <div>
-                <p className="text-xs text-gray-500">Admission Status</p>
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={student.status} />
-                  <p className="text-sm font-semibold capitalize">{student.status}</p>
-                </div>
-              </div>
-            </Card>
-            <Card className="flex items-center gap-4 p-4">
-              <div className="rounded-full bg-green-100 p-3 text-green-600"><BookOpen size={24} /></div>
-              <div>
-                <p className="text-xs text-gray-500">Courses Enrolled</p>
-                <p className="text-lg font-bold">0</p>
-              </div>
-            </Card>
-            <Card className="flex items-center gap-4 p-4">
-              <div className="rounded-full bg-yellow-100 p-3 text-yellow-600"><CreditCard size={24} /></div>
-              <div>
-                <p className="text-xs text-gray-500">Payment Status</p>
-                {payment && payment.status && payment.status !== "none" ? (
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={payment.status} />
-                    <p className="text-sm font-semibold capitalize">{payment.status}</p>
-                  </div>
-                ) : (
-                  <p className="text-sm font-medium text-gray-500">No payment recorded</p>
-                )}
-              </div>
-            </Card>
-          </div>
+        {activeTab === 'payments' && (
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">Financial History</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <DetailItem label="Total Paid"><span className="text-green-600 font-bold">₹{financial.total_paid.toFixed(2)}</span></DetailItem>
+                <DetailItem label="Wallet Balance">₹{financial.wallet_balance.toFixed(2)}</DetailItem>
+            </div>
+            <TableWrap>
+              <thead><tr><Th>Date</Th><Th>Amount</Th><Th>Type</Th><Th>Method</Th><Th>Transaction ID</Th><Th>Status</Th></tr></thead>
+              <tbody>
+                {financial.payments.length > 0 ? financial.payments.map(p => (
+                  <tr key={p.id}>
+                    <Td>{new Date(p.created_at).toLocaleString()}</Td>
+                    <Td>₹{p.amount}</Td>
+                    <Td>{p.payment_for_type}</Td>
+                    <Td>{p.payment_method}</Td>
+                    <Td>{p.transaction_id || 'N/A'}</Td>
+                    <Td><StatusBadge status={p.status} /></Td>
+                  </tr>
+                )) : <tr><Td colSpan="6" className="text-center">No payment history found.</Td></tr>}
+              </tbody>
+            </TableWrap>
+          </Card>
+        )}
 
-          {/* -- PENDING PAYMENT SECTION (Conditional) -- */}
-          {student.status !== "verified" && (
-            <Card className="mb-8 border-2 border-orange-400 bg-orange-50/50">
-              <div className="flex flex-col items-center gap-6 p-6 md:flex-row">
-                <div className="flex-1">
-                  <h2 className="mb-2 text-xl font-bold text-gray-900">Complete Your Admission</h2>
-                  <p className="mb-4 text-sm text-gray-600">
-                    Your admission is not yet verified. Please complete the payment process by uploading a screenshot of your payment transaction.
-                  </p>
-                  {paymentMsg.text && <div className="mb-4"><Alert type={paymentMsg.type}>{paymentMsg.text}</Alert></div>}
-                  <form onSubmit={uploadPayment} className="space-y-4 rounded-lg bg-white p-4 ring-1 ring-gray-200">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <input name="transactionId" placeholder="Transaction ID" value={pay.transactionId} onChange={(e) => setPay({ ...pay, transactionId: e.target.value })} className="w-full rounded-lg border-gray-200 px-3 py-2 text-sm" />
-                      <input name="amount" type="number" placeholder="Amount (₹)" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} className="w-full rounded-lg border-gray-200 px-3 py-2 text-sm" />
-                    </div>
-                    <input
-                      type="file"
-                      accept=".jpg,.jpeg,.png,.pdf"
-                      onChange={(e) => setPay({ ...pay, file: e.target.files[0] })}
-                      className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand/10 file:px-3 file:py-2 file:font-semibold file:text-brand hover:file:bg-brand/20"
-                    />
-                    <Button type="submit" loading={uploading} className="w-full">Submit for Verification</Button>
-                  </form>
-                </div>
-                <div className="w-full max-w-xs rounded-lg bg-white p-4 text-center ring-1 ring-gray-200">
-                  <h3 className="mb-2 font-semibold text-gray-800">Payment Details</h3>
-                  <img src="/qr-code.png" alt="QR Code for payment" className="mx-auto mb-2 w-32 h-32" />
-                  <p className="text-sm font-medium">UPI ID: <span className="font-mono text-brand">eduskill@upi</span></p>
-                  <p className="text-xs text-gray-500">Scan to pay or use the UPI ID</p>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* -- MAIN CONTENT GRID -- */}
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-            {/* Left Column */}
-            <div className="space-y-8 lg:col-span-2">
-              <Card>
-                <h2 className="mb-4 text-lg font-semibold text-gray-800">Study Materials</h2>
-                {materials.length === 0 ? (
-                  <p className="text-sm text-gray-500">No materials published yet. Check back soon!</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {materials.map((m) => (
-                      <li key={m.id} className="flex items-center justify-between rounded-lg border bg-gray-50/50 px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <FileDown className="h-5 w-5 text-gray-400" />
-                          <span className="text-sm font-medium text-gray-800">{m.title}</span>
+        {activeTab === 'courses' && (
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">Learning & Internships</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h4 className="font-semibold text-gray-700 mb-2">Enrolled Courses</h4>
+                    {learning.courses.length > 0 ? learning.courses.map(c => (
+                        <div key={c.id} className="border-b pb-2 mb-2">
+                            <p className="font-medium">{c.title}</p>
+                            <p className="text-xs text-gray-500">Status: {c.status} | Progress: {c.progress_percent}%</p>
                         </div>
-                        <a href={fileHref(m.file_path)} target="_blank" rel="noreferrer" className="text-sm font-semibold text-brand hover:underline">
-                          Download
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
+                    )) : <p className="text-sm text-gray-500">No courses enrolled.</p>}
+                </div>
+                <div>
+                    <h4 className="font-semibold text-gray-700 mb-2">Internship Programs</h4>
+                    {internships.length > 0 ? internships.map(p => (
+                        <div key={p.id} className="border-b pb-2 mb-2">
+                            <p className="font-medium">{p.program_title}</p>
+                            <p className="text-xs text-gray-500">Status: {p.status}</p>
+                        </div>
+                    )) : <p className="text-sm text-gray-500">No internships enrolled.</p>}
+                </div>
             </div>
+          </Card>
+        )}
 
-            {/* Right Column */}
-            <div className="space-y-8 lg:col-span-1">
-              <Card>
-                <h2 className="mb-4 text-lg font-semibold text-gray-800">Available Courses</h2>
-                {courses.length === 0 ? (
-                  <p className="text-sm text-gray-500">No courses available at the moment.</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {courses.map((c) => (
-                      <li key={c.id} className="rounded-lg border p-3">
-                        <p className="font-semibold text-gray-800">{c.title}</p>
-                        <p className="text-xs text-gray-500">{c.category} · <span className="font-bold text-green-600">{c.price ? `₹${c.price}` : "Free"}</span></p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-            </div>
-          </div>
-        </div>
-      </main>
+        {activeTab === 'documents' && (
+          <Card>
+            <h3 className="text-lg font-semibold mb-4">Uploaded Documents</h3>
+            <TableWrap>
+              <thead><tr><Th>Document Type</Th><Th>Filename</Th><Th>Uploaded On</Th><Th>Status</Th><Th>Actions</Th></tr></thead>
+              <tbody>
+                {learning.documents.length > 0 ? learning.documents.map(d => (
+                  <tr key={d.id}>
+                    <Td className="font-medium">{d.document_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</Td>
+                    <Td>{d.file_name}</Td>
+                    <Td>{new Date(d.uploaded_at).toLocaleDateString()}</Td>
+                    <Td><StatusBadge status={d.status.replace('pending_', '')} /></Td>
+                    <Td>
+                      <a href={d.file_url} target="_blank" rel="noreferrer" className="text-brand hover:underline text-sm font-semibold">
+                        View
+                      </a>
+                    </Td>
+                  </tr>
+                )) : <tr><Td colSpan="5" className="text-center">No documents have been uploaded.</Td></tr>}
+              </tbody>
+            </TableWrap>
+          </Card>
+        )}
+      </div>
     </>
   );
 }

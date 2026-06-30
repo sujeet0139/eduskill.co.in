@@ -1,129 +1,125 @@
-#!/usr/bin/env python3
-"""
-EduSkill deployment.
-
-ACTUAL architecture (important — the old deploy.py did NOT match this):
-  - Frontend (Next.js)  -> Vercel. Auto-builds on every push to GitHub `main`.
-  - Backend  (Express)  -> VPS 187.127.162.29, dir /var/www/eduskill,
-                           run by pm2 as process "eduskill-api" (port 3003).
-  - Database (MySQL)    -> on the VPS itself (DB_HOST=127.0.0.1 in the VPS .env).
-                           Schema is synced by check-db.js, which MUST run ON the VPS.
-
-So deploying = (1) push code to GitHub  ->  Vercel rebuilds the frontend
-              (2) SSH to the VPS, pull the code, migrate the DB, restart pm2.
-
-Requirements on the machine you run this from:
-    pip install paramiko
-The VPS SSH password is read from the env var VPS_PASSWORD, or prompted for.
-
-Usage:
-    python deploy.py                 # full deploy: push + frontend (Vercel) + backend (VPS) + db
-    python deploy.py --no-push       # skip git push; just redeploy current origin/main onto the VPS
-    python deploy.py --skip-db       # skip the DB migration step on the VPS
-    python deploy.py --backend-only  # don't push; only sync+restart the VPS backend
-"""
-import argparse
-import getpass
-import os
 import subprocess
+import os
 import sys
+import time
 
-VPS_HOST = "187.127.162.29"
-VPS_USER = "root"
-VPS_DIR = "/var/www/eduskill"
-PM2_APP = "eduskill-api"
-HEALTH_URL = "http://localhost:3003/health"
-
-
-def sh(cmd):
-    print(f"\n$ {cmd}")
-    subprocess.run(cmd, shell=True, check=True)
-
-
-def git_push():
-    sh("git add -A")
-    # commit only if there is something staged
-    if subprocess.run("git diff --cached --quiet", shell=True).returncode != 0:
-        msg = input("Commit message (enter for default): ").strip() or "chore: deploy"
-        sh(f'git commit -m "{msg}"')
-    else:
-        print("(nothing new to commit)")
-    sh("git push origin main")
-    print("\n✅ Pushed to GitHub. Vercel will auto-build the FRONTEND from this push.")
-
-
-def run_remote(client, cmd, label):
-    print(f"\n[VPS] $ {cmd}")
-    _, stdout, stderr = client.exec_command(cmd, timeout=600, get_pty=True)
-    out = stdout.read().decode("utf-8", "replace")
-    err = stderr.read().decode("utf-8", "replace")
-    code = stdout.channel.recv_exit_status()
-    if out.strip():
-        print("\n".join("   " + l for l in out.splitlines()))
-    if err.strip():
-        print("\n".join("   ! " + l for l in err.splitlines()))
-    if code != 0:
-        print(f"\n❌ Step failed ({label}), exit {code}. Aborting before restart.")
-        client.close()
-        sys.exit(1)
-    return out
-
-
-def deploy_vps(skip_db):
+def run_command(command, cwd=None):
+    """Runs a command and exits if it fails."""
+    print(f"▶️  Running command: {' '.join(command)}")
+    # Use capture_output=True to get stdout
     try:
-        import paramiko
-    except ImportError:
-        print("paramiko is required:  pip install paramiko")
+        # Using shell=True on Windows for npx, but passing a list is safer
+        # on Linux/macOS. For cross-platform, we can be explicit.
+        is_windows = sys.platform == "win32"
+        
+        # We want to capture the output to get the deployment URL
+        # On Windows, 'npx' might be a .cmd file, requiring shell=True
+        # or finding the exact path. Using shell=True is simpler here.
+        if is_windows:
+            result = subprocess.run(" ".join(command), check=True, shell=True, cwd=cwd, capture_output=True, text=True)
+            return result.stdout
+        else:
+            result = subprocess.run(command, check=True, cwd=cwd, capture_output=True, text=True)
+            return result.stdout
+            
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Command failed with exit code {e.returncode}: {' '.join(command)}")
+        print("Deployment aborted.")
+        sys.exit(1)
+    except FileNotFoundError:
+        print(f"\n❌ Command not found: {command[0]}. Is it in your PATH?")
+        print("Deployment aborted.")
         sys.exit(1)
 
-    pw = os.environ.get("VPS_PASSWORD") or getpass.getpass(f"SSH password for {VPS_USER}@{VPS_HOST}: ")
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(VPS_HOST, username=VPS_USER, password=pw, timeout=25,
-                   look_for_keys=False, allow_agent=False)
+def get_deployment_url(output):
+    """Parses Vercel CLI output to find the deployment URL."""
+    for line in output.splitlines():
+        # Look for the line that starts with "Inspect" or "Production" and contains the .vercel.app URL
+        if 'vercel.app' in line and ('Inspect' in line or 'Production' in line):
+            # Find the URL in the line
+            url = next((word for word in line.split() if 'vercel.app' in word), None)
+            if url: return url
+    return None
 
-    # 1. Sync code to exactly what's on origin/main (.env and node_modules are
-    #    git-ignored, so they're left untouched).
-    run_remote(client, f"cd {VPS_DIR} && git fetch origin && git reset --hard origin/main && git log --oneline -1", "git sync")
-
-    # 2. Install any new/updated dependencies.
-    run_remote(client, f"cd {VPS_DIR} && npm install --omit=dev", "npm install")
-
-    # 3. Migrate the VPS database (idempotent: CREATE TABLE IF NOT EXISTS, etc.).
-    if not skip_db:
-        run_remote(client, f"cd {VPS_DIR} && node check-db.js", "db migrate")
-    else:
-        print("\n(skipping DB migration)")
-
-    # 4. Restart the API and health-check.
-    run_remote(client, f"pm2 restart {PM2_APP} --update-env", "pm2 restart")
-    out = run_remote(client, f"sleep 2 && curl -s -o /dev/null -w '%{{http_code}}' {HEALTH_URL}", "health")
-    if out.strip().endswith("200"):
-        print("\n✅ Backend healthy (HTTP 200).")
-    else:
-        print(f"\n⚠️  Health check did not return 200 (got: {out.strip()}). Check: pm2 logs {PM2_APP}")
-
-    client.close()
-
+def ask_question(query):
+    """Asks a yes/no question to the user."""
+    answer = input(f"{query} (y/n) ").lower().strip()
+    return answer == 'y'
 
 def main():
-    ap = argparse.ArgumentParser(description="EduSkill deploy")
-    ap.add_argument("--no-push", action="store_true", help="skip git push")
-    ap.add_argument("--skip-db", action="store_true", help="skip DB migration on the VPS")
-    ap.add_argument("--backend-only", action="store_true", help="only redeploy the VPS backend (implies --no-push)")
-    args = ap.parse_args()
+    """Main deployment function."""
+    print('🚀 Starting EduSkill Production Deployment (Vercel)...\n')
 
-    print("🚀 EduSkill deploy\n")
+    # --- Step 1: Confirmation ---
+    print('------------------------------------------------------')
+    print('⚠️  You are about to deploy to PRODUCTION.')
+    print('------------------------------------------------------')
+    if not ask_question('Are you sure you want to continue?'):
+        print('Deployment cancelled.')
+        sys.exit(0)
 
-    if not (args.no_push or args.backend_only):
-        git_push()
+    # Check for --skip-db flag
+    skip_db = '--skip-db' in sys.argv
 
-    deploy_vps(args.skip_db)
+    # --- Step 2: Database Sync ---
+    if not skip_db:
+        print('\n📦 Step 2: Syncing Database & Running Migrations...')
+        print('   (Use --skip-db flag to bypass this step)')
+        run_command(['npm', 'run', 'db:setup'])
+        print('   ✓ Database sync complete.')
+    else:
+        print('\n- Step 2: Skipping database sync as requested.')
 
-    print("\n🎉 Done.")
-    print("   Frontend: check the Vercel dashboard for the build triggered by the push.")
-    print(f"   Backend:  https://api.eduskill.co.in  (pm2 '{PM2_APP}' on {VPS_HOST})")
+    # --- Step 3: Pre-flight Checks ---
+    print('\n🔍 Step 3: Running pre-flight checks...')
+    
+    # We can just let run_command handle the check for Vercel CLI
+    print('  - Vercel CLI will be used via npx.')
+    
+    frontend_path = os.path.join(os.path.dirname(__file__), 'frontend')
+    if not os.path.isdir(frontend_path):
+        print(f"\n❌ Frontend directory not found at: {frontend_path}")
+        print('Deployment aborted.')
+        sys.exit(1)
+    print('  ✓ Frontend directory exists.')
 
+    # --- Step 4: Deploy Backend with --force to clear build cache ---
+    print('\n\n⚙️  Step 4: Deploying Backend API to Vercel...')
+    # First, deploy to get a unique URL. The --force flag clears the remote build cache.
+    backend_output = run_command(['npx', 'vercel', '--force'])
+    backend_url = get_deployment_url(backend_output)
+    if not backend_url:
+        print("❌ Could not determine backend deployment URL. Aborting.")
+        sys.exit(1)
+    print(f"   ✓ Backend deployed to: {backend_url}")
+    
+    # Now, alias this specific deployment to production
+    print("   Promoting backend deployment to production...")
+    run_command(['npx', 'vercel', 'alias', 'set', backend_url, 'api.eduskill.co.in'])
+
+    # --- Step 5: Deploy Frontend with --force ---
+    print('\n\n🌐 Step 5: Deploying Frontend to Vercel...')
+    frontend_output = run_command(['npx', 'vercel', '--force'], cwd=frontend_path)
+    frontend_url = get_deployment_url(frontend_output)
+    if not frontend_url:
+        print("❌ Could not determine frontend deployment URL. Aborting.")
+        sys.exit(1)
+    print(f"   ✓ Frontend deployed to: {frontend_url}")
+    
+    print("   Promoting frontend deployment to production...")
+    run_command(['npx', 'vercel', 'alias', 'set', frontend_url, 'eduskill.co.in'], cwd=frontend_path)
+
+    print('\n\n✅ Deployments triggered successfully!')
+    print('   Waiting a moment for deployments to go live before smoke testing...')
+    time.sleep(60)  # Wait 60 seconds for Vercel builds to likely complete
+
+    # --- Step 6: Run Smoke Test ---
+    smoke_test_path = os.path.join(os.path.dirname(__file__), 'scripts', 'smoke_test.py')
+    print('\n\n🔥 Step 6: Running Production Smoke Test...')
+    print('   This will verify that the new deployments are healthy.')
+    run_command(['python', smoke_test_path])
+
+    print('\n\n🎉 Deployment process complete! Check the smoke test results above.')
 
 if __name__ == "__main__":
     main()

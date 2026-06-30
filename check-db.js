@@ -118,8 +118,10 @@ async function checkDatabase() {
       CREATE TABLE IF NOT EXISTS students (
         id INT PRIMARY KEY AUTO_INCREMENT,
         reference_no VARCHAR(50) UNIQUE NOT NULL,
+        enrollment_id VARCHAR(20) UNIQUE,
         name VARCHAR(100) NOT NULL,
         email VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(255),
         phone VARCHAR(255) NOT NULL,
         aadhar VARCHAR(255),
         pan VARCHAR(255),
@@ -128,6 +130,12 @@ async function checkDatabase() {
         wallet_balance DECIMAL(10,2) DEFAULT 0.00,
         college_id INT NOT NULL,
         department_id INT,
+        father_name VARCHAR(100),
+        mother_name VARCHAR(100),
+        parent_phone VARCHAR(50),
+        address_permanent TEXT,
+        reset_token VARCHAR(255),
+        reset_token_expiry DATETIME,
         status ENUM('registered', 'verified', 'completed') DEFAULT 'registered',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -138,10 +146,18 @@ async function checkDatabase() {
     `);
 
     // Safely alter existing students table if updating
+    await runAlterIfMissing('students', 'enrollment_id', "ALTER TABLE students ADD COLUMN enrollment_id VARCHAR(20) UNIQUE AFTER reference_no");
+    await runAlterIfMissing('students', 'password_hash', "ALTER TABLE students ADD COLUMN password_hash VARCHAR(255) AFTER email");
     await runAlterIfMissing('students', 'roll_number', "ALTER TABLE students ADD COLUMN roll_number VARCHAR(50)");
     await runAlterIfMissing('students', 'current_year', "ALTER TABLE students ADD COLUMN current_year INT DEFAULT 1");
     await runAlterIfMissing('students', 'wallet_balance', "ALTER TABLE students ADD COLUMN wallet_balance DECIMAL(10,2) DEFAULT 0.00");
     await runAlterIfMissing('students', 'department_id', "ALTER TABLE students ADD COLUMN department_id INT");
+    await runAlterIfMissing('students', 'father_name', "ALTER TABLE students ADD COLUMN father_name VARCHAR(100) AFTER department_id");
+    await runAlterIfMissing('students', 'mother_name', "ALTER TABLE students ADD COLUMN mother_name VARCHAR(100) AFTER father_name");
+    await runAlterIfMissing('students', 'parent_phone', "ALTER TABLE students ADD COLUMN parent_phone VARCHAR(50) AFTER mother_name");
+    await runAlterIfMissing('students', 'address_permanent', "ALTER TABLE students ADD COLUMN address_permanent TEXT AFTER parent_phone");
+    await runAlterIfMissing('students', 'reset_token', "ALTER TABLE students ADD COLUMN reset_token VARCHAR(255) AFTER address_permanent");
+    await runAlterIfMissing('students', 'reset_token_expiry', "ALTER TABLE students ADD COLUMN reset_token_expiry DATETIME AFTER reset_token");
     try { await connection.query("ALTER TABLE students ADD CONSTRAINT fk_student_college FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE CASCADE"); } catch(e){}
 
     // 3. PAYMENTS TABLE (Enhanced)
@@ -200,11 +216,13 @@ async function checkDatabase() {
         id INT PRIMARY KEY AUTO_INCREMENT,
         title VARCHAR(200) NOT NULL,
         description TEXT,
+        category VARCHAR(100),
         file_path VARCHAR(255) NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await runAlterIfMissing('study_materials', 'category', "ALTER TABLE study_materials ADD COLUMN category VARCHAR(100) AFTER description");
 
     // 6. PROGRAMS TABLE
     await connection.query(`
@@ -542,6 +560,96 @@ async function checkDatabase() {
         is_active BOOLEAN DEFAULT TRUE,
         order_no INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 21. TEACHERS TABLE
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS teachers (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        teacher_id VARCHAR(20) UNIQUE,
+        name VARCHAR(100) NOT NULL,
+        subject VARCHAR(100),
+        expertise TEXT,
+        qualification VARCHAR(200),
+        experience VARCHAR(50),
+        mobile VARCHAR(20) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        gender VARCHAR(20),
+        dob DATE,
+        address TEXT,
+        available_time VARCHAR(100),
+        profile_photo VARCHAR(255),
+        status ENUM('Active', 'Inactive') DEFAULT 'Active',
+        joining_date DATE,
+        class_timing VARCHAR(100),
+        remarks TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_email (email),
+        INDEX idx_teacher_id (teacher_id),
+        INDEX idx_status (status)
+      )`);
+
+    // 22. STUDENT DOCUMENTS TABLE
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS student_documents (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        student_id INT NOT NULL,
+        document_type VARCHAR(50) NOT NULL,
+        file_url VARCHAR(255) NOT NULL,
+        file_name VARCHAR(255),
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status ENUM('pending_verification', 'verified', 'rejected') DEFAULT 'pending_verification',
+        notes TEXT,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_doc (student_id, document_type)
+      )
+    `);
+
+    // 23. REGISTRATION FORM FIELDS
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS registration_fields (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        field_name VARCHAR(50) NOT NULL UNIQUE,
+        label VARCHAR(100) NOT NULL,
+        type ENUM('text', 'email', 'tel', 'password', 'number', 'select') DEFAULT 'text',
+        is_standard BOOLEAN DEFAULT TRUE,
+        is_enabled BOOLEAN DEFAULT TRUE,
+        is_mandatory BOOLEAN DEFAULT FALSE,
+        options JSON,
+        validation_regex VARCHAR(255),
+        order_no INT DEFAULT 0
+      )
+    `);
+
+    // Seed the standard fields into the new table if they don't exist
+    await connection.query(`
+      INSERT IGNORE INTO registration_fields (field_name, label, type, is_mandatory, is_enabled, order_no) VALUES
+      ('name', 'Full Name', 'text', TRUE, TRUE, 10),
+      ('email', 'Email Address', 'email', TRUE, TRUE, 20),
+      ('password', 'Password', 'password', TRUE, TRUE, 30),
+      ('phone', 'Mobile Number', 'tel', TRUE, TRUE, 40),
+      ('collegeId', 'College', 'select', TRUE, TRUE, 50),
+      ('department', 'Department', 'text', FALSE, TRUE, 60),
+      ('aadhar', 'Aadhaar Number', 'text', FALSE, TRUE, 70),
+      ('pan', 'PAN Number', 'text', FALSE, TRUE, 80),
+      ('roll_number', 'Class Roll Number', 'text', FALSE, TRUE, 90),
+      ('current_year', 'Current Year of Study', 'number', FALSE, TRUE, 100)
+    `);
+
+    // 22A. STUDENT CUSTOM FIELDS (to store data for custom registration fields)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS student_custom_fields (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        student_id INT NOT NULL,
+        field_id INT NOT NULL,
+        value TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (field_id) REFERENCES registration_fields(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_student_field (student_id, field_id)
       )
     `);
 

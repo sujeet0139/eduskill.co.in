@@ -98,4 +98,29 @@ async function sendPaymentConfirmationEmail(studentEmail, studentName, paymentDe
   }
 }
 
-module.exports = { sendWelcomeEmail, sendClassReminderEmail, sendClassMaterialsEmail, sendPaymentConfirmationEmail };
+async function sendPasswordResetEmail(studentEmail, studentName, resetToken) {
+  try {
+    // The frontend URL should be an environment variable for flexibility
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://eduskill.co.in'}/reset-password?token=${resetToken}`;
+
+    const info = await transporter.sendMail({
+      from: `"EduSkill" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      to: studentEmail,
+      subject: "Password Reset Request - EduSkill",
+      html: `
+        <h2>Hi ${studentName},</h2>
+        <p>A password reset was requested for your account by an administrator.</p>
+        <p>Click the link below to set a new password. This link is valid for 1 hour.</p>
+        <p><a href="${resetUrl}" style="background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px;">Reset Your Password</a></p>
+        <p>If you did not request this, you can safely ignore this email.</p>
+        <br/>
+        <p>Best Regards,<br/>The EduSkill Team</p>
+      `,
+    });
+    console.log("Password reset email sent successfully: %s", info.messageId);
+  } catch (error) {
+    console.error("Error sending password reset email:", error);
+  }
+}
+
+module.exports = { sendWelcomeEmail, sendClassReminderEmail, sendClassMaterialsEmail, sendPaymentConfirmationEmail, sendPasswordResetEmail };

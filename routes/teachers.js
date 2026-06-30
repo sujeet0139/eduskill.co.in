@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { requireAdmin } = require('../middleware/authMiddleware'); // Already present
 
 // Profile photo upload middleware (up to 2MB)
 const upload = makeUpload({
@@ -13,7 +14,7 @@ const upload = makeUpload({
 });
 
 // 1. GET ALL TEACHERS WITH PAGINATION, SEARCH, AND STATUS FILTER
-router.get('/', async (req, res) => {
+router.get('/', requireAdmin, async (req, res) => { // requireAdmin is correctly here
   let connection;
   try {
     const page = parseInt(req.query.page) || 1;
@@ -67,7 +68,7 @@ router.get('/', async (req, res) => {
 });
 
 // 2. GET TEACHER DETAILS BY ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', requireAdmin, async (req, res) => { // requireAdmin is correctly here
   let connection;
   try {
     connection = await pool.getConnection();
@@ -94,7 +95,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // 3. CREATE NEW TEACHER (WITH TRANSACTION FOR SAFE AUTO-GENERATED ID)
-router.post('/', upload.single('profile_photo'), async (req, res) => {
+router.post('/', requireAdmin, upload.single('profile_photo'), async (req, res) => {
   const {
     name, subject, expertise, qualification, experience, 
     mobile, email, gender, dob, address, available_time,
@@ -178,7 +179,7 @@ router.post('/', upload.single('profile_photo'), async (req, res) => {
 });
 
 // 4. UPDATE TEACHER
-router.put('/:id', upload.single('profile_photo'), async (req, res) => {
+router.put('/:id', requireAdmin, upload.single('profile_photo'), async (req, res) => { // requireAdmin is correctly here
   const teacherId = req.params.id;
   const {
     name, subject, expertise, qualification, experience, 
@@ -252,7 +253,7 @@ router.put('/:id', upload.single('profile_photo'), async (req, res) => {
 });
 
 // 5. DELETE TEACHER
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => { // requireAdmin is correctly here
   let connection;
   try {
     connection = await pool.getConnection();

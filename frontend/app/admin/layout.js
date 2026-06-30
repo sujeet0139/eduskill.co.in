@@ -6,16 +6,50 @@ import { useEffect, useState } from "react";
 import { adminAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 
-// Only routes that have pages today. More (colleges, materials, certificates,
-// announcements, admins, settings) to be added later.
-const NAV = [
-  { href: "/admin", label: "Dashboard" },
-  { href: "/admin/students", label: "Students" },
-  { href: "/admin/payments", label: "Payments" },
-  { href: "/admin/courses", label: "Courses" },
-  { href: "/admin/programs", label: "Programs" },
-  { href: "/admin/teachers", label: "Teachers" },
+// Sidebar grouped by area. More (materials, certificates, announcements,
+// live-classes, exams, admins) to be added in later phases.
+const NAV_GROUPS = [
+  {
+    title: null,
+    items: [{ href: "/admin", label: "Dashboard" }],
+  },
+  {
+    title: "People",
+    items: [
+      { href: "/admin/students", label: "Students" },
+      { href: "/admin/teachers", label: "Teachers" },
+      { href: "/admin/faculty", label: "Faculty" },
+    ],
+  },
+  {
+    title: "Academics",
+    items: [
+      { href: "/admin/courses", label: "Courses" },
+      { href: "/admin/programs", label: "Programs" },
+      { href: "/admin/materials", label: "Study Materials" },
+      { href: "/admin/certificates", label: "Certificates" },
+    ],
+  },
+  {
+    title: "Masters",
+    items: [
+      { href: "/admin/colleges", label: "Colleges" },
+      { href: "/admin/districts", label: "Cities / Districts" },
+      { href: "/admin/departments", label: "Departments" },
+    ],
+  },
+  {
+    title: "System",
+    items: [
+      { href: "/admin/payments", label: "Payments" },
+      { href: "/admin/settings/registration", label: "Form Builder" },
+      { href: "/admin/settings", label: "Settings" },
+    ],
+  },
 ];
+
+// Flat list for the mobile top-bar.
+const NAV = NAV_GROUPS.flatMap((g) => g.items);
 
 export default function AdminLayout({ children }) {
   const pathname = usePathname();
@@ -53,21 +87,30 @@ export default function AdminLayout({ children }) {
         <div className="border-b border-gray-700 px-5 py-4 text-lg font-bold text-white">
           eduskill <span className="text-brand">admin</span>
         </div>
-        <nav className="flex-1 space-y-1 px-3 py-4">
-          {NAV.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block rounded-lg px-3 py-2 text-sm ${
-                  active ? "bg-brand text-white" : "hover:bg-gray-800"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={group.title || `g${gi}`} className="space-y-1">
+              {group.title && (
+                <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  {group.title}
+                </p>
+              )}
+              {group.items.map((item) => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`block rounded-lg px-3 py-2 text-sm ${
+                      active ? "bg-brand text-white" : "hover:bg-gray-800"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
         <button onClick={logout} className="border-t border-gray-700 px-5 py-3 text-left text-sm hover:bg-gray-800">
           Logout

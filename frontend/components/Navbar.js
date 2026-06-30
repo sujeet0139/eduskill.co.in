@@ -21,6 +21,9 @@ export default function Navbar() {
           <Link href="/" className="hidden text-gray-600 hover:text-brand sm:inline">
             Home
           </Link>
+          <Link href="/materials" className="hidden text-gray-600 hover:text-brand sm:inline">
+            Materials
+          </Link>
           <Link href="/register" className="text-gray-600 hover:text-brand">
             Register
           </Link>

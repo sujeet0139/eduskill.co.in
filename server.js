@@ -118,6 +118,9 @@ app.use('/api/reports', requireAdmin, reportsRouter);
 const settingsRouter = require('./routes/settings');
 app.use('/api/settings', requireAdmin, settingsRouter);
 
+const formSettingsRouter = require('./routes/form-settings');
+app.use('/api/form-settings', requireAdmin, formSettingsRouter);
+
 const collegesRouter = require('./routes/colleges');
 app.use('/api/colleges', requireAdmin, collegesRouter);
 
@@ -143,7 +146,7 @@ const heroSlidesRouter = require('./routes/hero-slides');
 app.use('/api/hero-slides', requireAdmin, heroSlidesRouter);
 
 const teachersRouter = require('./routes/teachers');
-app.use('/api/teachers', requireAdmin, teachersRouter);
+app.use('/api/teachers', teachersRouter); // Middleware is now handled inside teachers.js
 
 // Start the notification scheduler
 const notificationScheduler = require('./scripts/notification-scheduler');

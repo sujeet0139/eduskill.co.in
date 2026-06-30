@@ -22,10 +22,14 @@ async function setupDatabaseAndUser() {
     await connection.query("CREATE DATABASE IF NOT EXISTS `eduskill` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;");
     console.log('✅ Database "eduskill" created (or already exists).');
 
+    const appPassword = process.env.DB_PASSWORD; // Already present, but confirming logic
+    if (!appPassword) {
+      throw new Error('DB_PASSWORD is not set in your .env file.');
+    }
+
     // 2. Create User and Grant Permissions (scoped to eduskill DB only — no impact to other DBs)
-    await connection.query("CREATE USER IF NOT EXISTS 'eduskill'@'%' IDENTIFIED BY 'Eduskil@146';");
-    // If the user already exists, update their password just in case
-    await connection.query("ALTER USER 'eduskill'@'%' IDENTIFIED BY 'Eduskil@146';");
+    await connection.query("CREATE USER IF NOT EXISTS 'eduskill'@'%' IDENTIFIED BY ?", [appPassword]);
+    await connection.query("ALTER USER 'eduskill'@'%' IDENTIFIED BY ?", [appPassword]);
     await connection.query("GRANT ALL PRIVILEGES ON eduskill.* TO 'eduskill'@'%';");
     await connection.query("FLUSH PRIVILEGES;");
     console.log('✅ User "eduskill" configured and granted privileges!');
