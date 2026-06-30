@@ -1,86 +1,88 @@
-# EduSkill — Production Deploy Guide
+# EduSkill — How to Deploy (Home Laptop Guide)
 
-> ⚠️ **Deploy from home / a non-corporate network.** The office Zscaler proxy
-> breaks Vercel's certificate + alias step (`Issuing a certificate -> Response Error`)
-> and blocks `*.vercel.app`. Cloud deploy will not work behind Zscaler.
+> ⚠️ **Deploy from HOME Wi‑Fi or a mobile hotspot.** The office Zscaler proxy
+> blocks Vercel and the deploy will fail. Cloud deploy only works off Zscaler.
 
-## Production topology (verified 2026-06-30)
+There are two ways to deploy. **Easiest = double-click the `.bat` files.**
 
-| Tier | Vercel project | Domain | How it deploys |
-|------|----------------|--------|----------------|
-| Frontend (Next.js, `frontend/`) | `eduskill-co-in` | `eduskill.co.in` | **`git push origin main`** → auto-builds |
-| Backend (Express, repo root) | `intershiop` | `api.eduskill.co.in` | `vercel --prod` + alias the domain |
+---
 
-Both run on Vercel (the backend is a serverless function — see `server.js`).
-There is **no** VPS / pm2 anymore.
+## A. Easiest way — double-click (Windows)
 
-## One-time setup on your home laptop
+### One-time setup (do once on the home laptop)
+1. Install **Node.js**: https://nodejs.org (LTS version) and **Git**: https://git-scm.com
+2. Get the project (pick ONE):
+   - **Git (recommended):** open a terminal and run
+     ```
+     git clone https://github.com/sujeet0139/eduskill.co.in.git
+     ```
+   - **Manual copy:** copy the whole project folder from your office PC to the
+     home laptop via USB/Drive. **Also copy the hidden `.env` file** (it is not
+     included in Git). Then in the folder run `npm install`.
+3. Put your **`.env`** file in the project root (production DB, SMTP, Cloudinary,
+   JWT keys — see `.env.example` for the list). This file is secret and is never
+   in Git, so you must copy it yourself.
+4. Double-click **`setup.bat`** — it installs everything and logs you into Vercel
+   (a browser opens; log in as the account that owns the Vercel projects).
 
-1. Get the code (it's already on GitHub):
-   ```bash
-   git clone https://github.com/sujeet0139/eduskill.co.in.git
-   cd eduskill.co.in
-   npm install
-   ```
-2. Copy your **`.env`** into the repo root (it is git-ignored, so it is NOT in the
-   clone). It must contain the **production** DB credentials, JWT secret, SMTP,
-   Cloudinary keys, etc. (see `.env.example` for the list).
-3. Log in to Vercel once:
-   ```bash
-   npx vercel login
-   ```
-   Use the account that owns the `eduskill-co-in` / `intershiop` projects
-   (`sujeet0139-...`).
+### Every time you want to deploy
+- Double-click **`deploy.bat`**.
+  It pulls the latest code, deploys the backend, points `api.eduskill.co.in` at
+  it, updates the database, and runs a health check. Read the messages at the end.
 
-## Deploy (every time)
+That's it. ✅
+
+---
+
+## B. Command way (any OS)
 
 ```bash
-git pull            # get the latest code
-npm run deploy      # = node deploy.js
+# one-time
+git clone https://github.com/sujeet0139/eduskill.co.in.git
+cd eduskill.co.in
+npm install
+npx vercel login          # log in as the project owner
+# copy your .env file into this folder
+
+# every deploy
+git pull
+npm run deploy            # = node deploy.js
 ```
 
-`deploy.js` will:
-1. `git push origin main` → frontend auto-deploys
-2. `vercel --prod` → backend deploys
-3. alias `api.eduskill.co.in` → the new backend deployment
-4. `npm run db:setup` → apply any DB migrations
-5. smoke-test `/health`, `/api/public/registration-form`, and `/register`
-
-### Useful flags
+### Deploy flags
 ```bash
-node deploy.js --yes           # no confirm prompt
-node deploy.js --backend-only  # only backend deploy + alias
+node deploy.js --yes           # skip the confirm prompt
+node deploy.js --backend-only  # only redeploy the API
 node deploy.js --skip-db       # don't touch the database
-node deploy.js --skip-push     # don't redeploy the frontend
 ```
 
-## Verify it worked
+---
 
-```bash
-curl https://api.eduskill.co.in/health
-curl https://api.eduskill.co.in/api/public/registration-form
-```
-The second must return `{"success":true,"fields":[...]}` — if it says
-`Cannot GET`, the backend alias did not switch over (re-run step 2–3 off Zscaler).
+## What the deploy does (so you know it's safe)
 
-## Recommended one-time fix (kills the flaky alias step forever)
+| Step | Action |
+|------|--------|
+| 1 | `git push` → **frontend** auto-builds on Vercel (`eduskill.co.in`) |
+| 2 | `vercel --prod` → **backend** deploys (project `intershiop`) |
+| 3 | aliases **`api.eduskill.co.in`** to the new backend |
+| 4 | `npm run db:setup` → applies new DB columns safely (no data loss) |
+| 5 | health-checks the API + site |
 
+## Check it worked
+Open these in a browser (should NOT say "Cannot GET"):
+- https://api.eduskill.co.in/health → `{"database":"Connected"}`
+- https://api.eduskill.co.in/api/public/registration-form → `{"success":true,...}`
+- https://eduskill.co.in/register → the registration form loads
+
+---
+
+## One-time fix to make deploys painless (optional but recommended)
 In the **Vercel dashboard → project `intershiop` → Settings → Domains**, add
-`api.eduskill.co.in` as a **Production** domain (and set DNS `A api 76.76.21.21`
-at GoDaddy if Vercel flags it). After that, `vercel --prod` assigns the domain
-automatically and you can drop the alias step.
+`api.eduskill.co.in` as a **Production** domain. After that you can skip the alias
+step and even auto-deploy the backend from Git like the frontend.
 
-## Manual fallback (if the script ever fails mid-way)
-
-```bash
-# frontend
-git push origin main
-
-# backend
-npx vercel --prod --yes
-# copy the printed https://intershiop-XXXX.vercel.app URL, then:
-npx vercel alias set https://intershiop-XXXX....vercel.app api.eduskill.co.in
-
-# database (only when schema changed)
-npm run db:setup
-```
+## If something fails
+- "Issuing a certificate → Response Error" → you're on Zscaler/office network.
+  Switch to home Wi-Fi / hotspot and run again.
+- DB step fails → make sure `.env` points at the **production** database.
+- Manual fallback commands are in the "B. Command way" section above.

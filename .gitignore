@@ -26,8 +26,6 @@ MANUAL_SETUP_COMMANDS.md
 STUDENT_REGISTRATION_DEVELOPMENT_PROMPT.md
 promotdev.txt
 reference.txt
-deploy.bat
-deploy.sh
 deploy_vercel.py
 
 # Stray frontend fragments dumped in the backend root — belong in the Next.js app.
