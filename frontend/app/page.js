@@ -1,5 +1,6 @@
 import Link from "next/link";
 import HeroBanner from "@/components/HeroBanner";
+import LiveStats from "@/components/LiveStats";
 
 const COLLEGES = [
   { name: "Jankidevi College", district: "Darbhanga" },
@@ -92,14 +93,7 @@ export default function HomePage() {
             </button>
           </Link>
         </div>
-        <div className="flex flex-wrap gap-8 justify-center">
-          {[["5,000+","Students Enrolled"],["8","LNMU Colleges"],["3","Skill Programs"],["95%","Satisfaction Rate"],["8 Wks","Program Duration"]].map(([num, lbl]) => (
-            <div key={lbl} className="text-center">
-              <div className="text-3xl font-bold">{num}</div>
-              <div className="text-blue-300 text-xs mt-1">{lbl}</div>
-            </div>
-          ))}
-        </div>
+        <LiveStats />
       </section>
 
       {/* TRUST BAR */}
@@ -256,7 +250,7 @@ export default function HomePage() {
       </section>
 
       {/* COURSES */}
-      <section className="py-16 px-4 bg-white">
+      <section id="courses" className="py-16 px-4 bg-white scroll-mt-16">
         <div className="max-w-6xl mx-auto text-center">
           <span className="inline-block bg-blue-50 text-blue-900 px-4 py-1 rounded-full text-xs font-semibold mb-3">Skill Programs</span>
           <h2 className="text-3xl font-bold text-gray-900 mb-3">Online Training Courses</h2>
@@ -375,7 +369,7 @@ export default function HomePage() {
       </section>
 
       {/* CTA */}
-      <section className="bg-gradient-to-r from-orange-500 to-red-500 py-16 px-4 text-white text-center">
+      <section id="contact" className="bg-gradient-to-r from-orange-500 to-red-500 py-16 px-4 text-white text-center scroll-mt-16">
         <h2 className="text-4xl font-bold mb-3">Ready to Start Your Career Journey?</h2>
         <p className="text-lg opacity-90 max-w-md mx-auto mb-8">
           Join 5,000+ LNMU students already building real skills and getting certified with EduSkill.

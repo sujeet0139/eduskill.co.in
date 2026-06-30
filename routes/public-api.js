@@ -64,6 +64,41 @@ router.get('/payment-info', async (req, res) => {
   }
 });
 
+// GET /api/public/stats - real counts for the homepage (students, colleges, courses, certificates)
+router.get('/stats', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const safeCount = async (sql) => {
+      try { const [[r]] = await connection.query(sql); return r.c; } catch { return 0; }
+    };
+    const stats = {
+      students: await safeCount('SELECT COUNT(*) c FROM students'),
+      colleges: await safeCount('SELECT COUNT(*) c FROM colleges'),
+      courses: await safeCount("SELECT COUNT(*) c FROM courses WHERE status = 'active'"),
+      programs: await safeCount("SELECT COUNT(*) c FROM programs WHERE status = 'active'"),
+      certificates: await safeCount("SELECT COUNT(*) c FROM certificates WHERE status = 'active'"),
+    };
+    connection.release();
+    res.json({ success: true, stats });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch stats', details: error.message });
+  }
+});
+
+// GET /api/public/announcements - latest sent announcements for the ticker
+router.get('/announcements', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [announcements] = await connection.query(
+      "SELECT title, message, created_at FROM announcements WHERE status = 'sent' ORDER BY created_at DESC LIMIT 8"
+    );
+    connection.release();
+    res.json({ success: true, announcements });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch announcements', details: error.message });
+  }
+});
+
 // GET /api/public/site-info - public institute + social links for header/footer
 router.get('/site-info', async (req, res) => {
   try {
