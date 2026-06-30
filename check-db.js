@@ -130,6 +130,7 @@ async function checkDatabase() {
         wallet_balance DECIMAL(10,2) DEFAULT 0.00,
         college_id INT NOT NULL,
         department_id INT,
+        department VARCHAR(150),
         father_name VARCHAR(100),
         mother_name VARCHAR(100),
         parent_phone VARCHAR(50),
@@ -152,6 +153,7 @@ async function checkDatabase() {
     await runAlterIfMissing('students', 'current_year', "ALTER TABLE students ADD COLUMN current_year INT DEFAULT 1");
     await runAlterIfMissing('students', 'wallet_balance', "ALTER TABLE students ADD COLUMN wallet_balance DECIMAL(10,2) DEFAULT 0.00");
     await runAlterIfMissing('students', 'department_id', "ALTER TABLE students ADD COLUMN department_id INT");
+    await runAlterIfMissing('students', 'department', "ALTER TABLE students ADD COLUMN department VARCHAR(150) AFTER department_id");
     await runAlterIfMissing('students', 'father_name', "ALTER TABLE students ADD COLUMN father_name VARCHAR(100) AFTER department_id");
     await runAlterIfMissing('students', 'mother_name', "ALTER TABLE students ADD COLUMN mother_name VARCHAR(100) AFTER father_name");
     await runAlterIfMissing('students', 'parent_phone', "ALTER TABLE students ADD COLUMN parent_phone VARCHAR(50) AFTER mother_name");
