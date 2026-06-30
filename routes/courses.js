@@ -16,13 +16,13 @@ router.get('/', async (req, res) => {
 
 // CREATE NEW COURSE
 router.post('/', async (req, res) => {
-  const { title, category, description, duration_weeks, price, language, level, status } = req.body;
+  const { title, category, description, duration_weeks, price, min_payment, language, level, status } = req.body;
   try {
     const connection = await pool.getConnection();
     await connection.query(
-      `INSERT INTO courses (title, category, description, duration_weeks, price, language, level, status) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, category, description, duration_weeks, price, language, level, status || 'draft']
+      `INSERT INTO courses (title, category, description, duration_weeks, price, min_payment, language, level, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, category, description, duration_weeks, price || 0, min_payment || 0, language, level, status || 'draft']
     );
     connection.release();
     res.json({ success: true, message: 'Course created successfully' });
@@ -33,12 +33,12 @@ router.post('/', async (req, res) => {
 
 // UPDATE COURSE
 router.put('/:id', async (req, res) => {
-  const { title, category, description, duration_weeks, price, language, level, status } = req.body;
+  const { title, category, description, duration_weeks, price, min_payment, language, level, status } = req.body;
   try {
     const connection = await pool.getConnection();
     await connection.query(
-      `UPDATE courses SET title=?, category=?, description=?, duration_weeks=?, price=?, language=?, level=?, status=? WHERE id=?`,
-      [title, category, description, duration_weeks, price, language, level, status, req.params.id]
+      `UPDATE courses SET title=?, category=?, description=?, duration_weeks=?, price=?, min_payment=?, language=?, level=?, status=? WHERE id=?`,
+      [title, category, description, duration_weeks, price || 0, min_payment || 0, language, level, status, req.params.id]
     );
     connection.release();
     res.json({ success: true, message: 'Course updated successfully' });

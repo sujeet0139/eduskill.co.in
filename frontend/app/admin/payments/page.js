@@ -27,12 +27,13 @@ export default function AdminPayments() {
   useEffect(load, []);
 
   const approve = async (p) => {
-    try { await api.post("/api/payments/approve", { paymentId: p.id, studentId: p.student_id }, token()); load(); }
+    if (!confirm(`Approve payment of ₹${p.amount} from ${p.name}?`)) return;
+    try { await api.post(`/api/payments/${p.id}/approve`, { transaction_id: p.transaction_id || "" }, token()); load(); }
     catch (e) { alert(e.message); }
   };
   const refund = async (p) => {
-    if (!confirm("Mark this payment as failed/refunded?")) return;
-    try { await api.put(`/api/payments/${p.id}/refund`, {}, token()); load(); }
+    if (!confirm("Mark this payment as failed/rejected?")) return;
+    try { await api.post(`/api/payments/${p.id}/reject`, { notes: "Rejected by admin" }, token()); load(); }
     catch (e) { alert(e.message); }
   };
   const addManual = async (e) => {

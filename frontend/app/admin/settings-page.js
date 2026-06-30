@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { PageHeader } from "@/components/admin";
 import { Card, Input, Button, Alert } from "@/components/ui";
-import { Building2, CreditCard, Mail, Save, Check, AlertCircle } from "lucide-react";
+import { Building2, CreditCard, Mail, Save, Check, AlertCircle, Share2 } from "lucide-react";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("institute");
@@ -53,9 +53,31 @@ export default function SettingsPage() {
     }
   };
 
+  const [qrUploading, setQrUploading] = useState(false);
+
+  const uploadQr = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setQrUploading(true);
+    setError("");
+    try {
+      const fd = new FormData();
+      fd.append("qr", file);
+      const res = await api.postForm("/api/settings/upload-qr", fd, adminAuth.token());
+      setSettings((prev) => ({ ...prev, payment_upi_qr_url: res.url }));
+      setSuccess("QR code uploaded.");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err) {
+      setError("QR upload failed: " + err.message);
+    } finally {
+      setQrUploading(false);
+    }
+  };
+
   const tabs = [
     { id: "institute", label: "Institute Details", icon: Building2 },
     { id: "payment", label: "Payment Settings", icon: CreditCard },
+    { id: "social", label: "Social Media", icon: Share2 },
     { id: "email", label: "Email (SMTP)", icon: Mail },
   ];
 
@@ -232,16 +254,23 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      UPI QR Code Image URL
+                      UPI QR Code
                     </label>
                     <Input
                       name="payment_upi_qr_url"
                       value={settings.payment_upi_qr_url || ""}
                       onChange={handleChange}
                       placeholder="https://cdn.example.com/qr-code.png"
-                      type="url"
                     />
-                    <p className="text-xs text-gray-500 mt-1">Public image URL of your QR code</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <input type="file" accept=".png,.jpg,.jpeg,.webp" onChange={uploadQr}
+                        className="text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white" />
+                      {qrUploading && <span className="text-xs text-gray-500">Uploading…</span>}
+                    </div>
+                    {settings.payment_upi_qr_url && (
+                      <img src={settings.payment_upi_qr_url} alt="UPI QR" className="mt-3 h-32 w-32 rounded-lg border object-contain p-1" />
+                    )}
+                    <p className="text-xs text-gray-500 mt-1">Upload an image or paste a URL. Shown to students on the pay screen.</p>
                   </div>
                 </div>
               </div>
@@ -265,6 +294,34 @@ export default function SettingsPage() {
                   />
                   <p className="text-xs text-gray-500 mt-1">Displayed to students during checkout</p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Social Media Tab */}
+          {activeTab === "social" && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
+                <Share2 className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-semibold">Social Media & Contact Links</p>
+                  <p>These appear in the website footer and contact sections. Leave blank to hide.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {[
+                  ["social_whatsapp", "WhatsApp Number / Link", "https://wa.me/91XXXXXXXXXX"],
+                  ["social_facebook", "Facebook URL", "https://facebook.com/..."],
+                  ["social_instagram", "Instagram URL", "https://instagram.com/..."],
+                  ["social_youtube", "YouTube URL", "https://youtube.com/@..."],
+                  ["social_linkedin", "LinkedIn URL", "https://linkedin.com/company/..."],
+                  ["social_twitter", "Twitter / X URL", "https://x.com/..."],
+                ].map(([name, label, ph]) => (
+                  <div key={name}>
+                    <label className="block text-sm font-semibold text-gray-900 mb-2">{label}</label>
+                    <Input name={name} value={settings[name] || ""} onChange={handleChange} placeholder={ph} />
+                  </div>
+                ))}
               </div>
             </div>
           )}

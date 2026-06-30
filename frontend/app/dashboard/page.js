@@ -1,198 +1,258 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { adminAuth } from "@/lib/auth";
-import { Button, Card, StatusBadge, Alert } from "@/components/ui";
-import { PageHeader, TableWrap, Th, Td } from "@/components/admin";
-import { User, GraduationCap, Banknote, BookOpen, FileText, Briefcase } from "lucide-react";
+import { studentAuth } from "@/lib/auth";
 
-const DetailItem = ({ label, value, children }) => (
-  <div>
-    <p className="text-xs text-gray-500">{label}</p>
-    <div className="text-sm font-medium text-gray-800">{children || value || "—"}</div>
-  </div>
-);
+const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+const fileHref = (p) => (!p ? null : /^https?:\/\//.test(p) ? p : `${api.base}${p}`);
 
-export default function StudentProfilePage() {
-  const params = useParams();
-  const studentId = params.id;
-  const [profile, setProfile] = useState(null);
+export default function StudentDashboard() {
+  const router = useRouter();
+  const [student, setStudent] = useState(null);
+  const [courses, setCourses] = useState([]);
+  const [programs, setPrograms] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [certs, setCerts] = useState([]);
+  const [payInfo, setPayInfo] = useState({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("profile");
 
-  const token = () => adminAuth.token();
+  // Pay modal state
+  const [payItem, setPayItem] = useState(null); // {type,id,title,price,min}
+  const [amount, setAmount] = useState("");
+  const [stage, setStage] = useState("choose"); // choose -> pay -> done
+  const [paymentId, setPaymentId] = useState(null);
+  const [dueNow, setDueNow] = useState(0);
+  const [txnId, setTxnId] = useState("");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  const loadProfile = () => {
-    if (!studentId) return;
-    setLoading(true);
-    api.get(`/api/students/${studentId}/full-profile`, token())
-      .then(res => setProfile(res.profile))
-      .catch(err => setError("Failed to load student profile: " + err.message))
-      .finally(() => setLoading(false));
+  const token = () => studentAuth.token();
+
+  const loadAll = () => {
+    api.get("/api/student-dashboard/profile", token()).then((d) => setStudent(d.profile)).catch(() => {
+      studentAuth.logout(); router.replace("/login");
+    });
+    api.get("/api/courses").then((d) => setCourses((d.courses || []).filter((c) => c.status === "active"))).catch(() => {});
+    api.get("/api/programs").then((d) => setPrograms((d.programs || []).filter((p) => p.status === "active"))).catch(() => {});
+    api.get("/api/student-dashboard/certificates", token()).then((d) => setCerts(d.certificates || [])).catch(() => {});
+    api.get("/api/public/payment-info").then((d) => setPayInfo(d.payment || {})).catch(() => {});
   };
 
-  useEffect(loadProfile, [studentId]);
+  const loadPayments = (sid) =>
+    api.get(`/api/payments?student_id=${sid}`).then((d) => setPayments(d.payments || [])).catch(() => {});
 
-  const verifyStudent = async () => {
-    if (!confirm("Are you sure you want to mark this student as verified?")) return;
+  useEffect(() => {
+    if (!studentAuth.token()) { router.replace("/login"); return; }
+    loadAll();
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (student?.id) loadPayments(student.id); }, [student?.id]);
+
+  const logout = async () => {
+    try { await api.post("/api/auth/logout"); } catch {}
+    studentAuth.logout();
+    router.push("/login");
+  };
+
+  // ---- Payment flow ----
+  const openPay = (type, item) => {
+    const price = type === "course" ? Number(item.price || 0) : Number(item.fee || 0);
+    const min = Number(item.min_payment || 0);
+    setPayItem({ type, id: item.id, title: item.title, price, min });
+    setAmount(price ? String(price) : "");
+    setStage("choose"); setPaymentId(null); setTxnId(""); setFile(null); setMsg("");
+  };
+
+  const initiate = async () => {
+    setBusy(true); setMsg("");
     try {
-      await api.put(`/api/students/${studentId}/verify`, {}, token());
-      loadProfile(); // Refresh profile to show new status
-    } catch (err) {
-      alert("Verification failed: " + err.message);
-    }
+      const res = await api.post("/api/payments/initiate", {
+        student_id: student.id, item_type: payItem.type, item_id: payItem.id, amount: Number(amount),
+      });
+      if (res.payment_type === "wallet") {
+        setMsg("Enrolled using your wallet balance!");
+        setStage("done"); loadPayments(student.id);
+      } else {
+        setPaymentId(res.payment_id); setDueNow(res.amount_due); setStage("pay");
+      }
+    } catch (e) { setMsg(e.message); }
+    finally { setBusy(false); }
   };
 
-  if (loading) return <div className="p-6">Loading student profile...</div>;
-  if (error) return <Alert type="error">{error}</Alert>;
-  if (!profile) return <Alert type="error">Student not found.</Alert>;
+  const submitProof = async (e) => {
+    e.preventDefault();
+    if (!file) { setMsg("Please attach your payment screenshot."); return; }
+    setBusy(true); setMsg("");
+    try {
+      const fd = new FormData();
+      fd.append("screenshot", file);
+      fd.append("transaction_id", txnId);
+      await api.postForm(`/api/payments/${paymentId}/upload-proof`, fd, token());
+      setStage("done"); loadPayments(student.id);
+    } catch (e) { setMsg(e.message); }
+    finally { setBusy(false); }
+  };
 
-  const { basic, financial, learning, internships } = profile;
+  const closePay = () => setPayItem(null);
 
-  const TABS = [
-    { id: "profile", label: "Profile", icon: User },
-    { id: "payments", label: "Payments", icon: Banknote },
-    { id: "courses", label: "Courses", icon: BookOpen },
-    { id: "documents", label: "Documents", icon: FileText },
-  ];
+  if (loading) {
+    return <main className="flex min-h-[70vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" /></main>;
+  }
 
   return (
-    <>
-      <PageHeader
-        title={basic.name}
-        subtitle={`Enrollment ID: ${basic.enrollment_id} | ${basic.college_name}`}
-        action={
-          <div className="flex gap-2">
-            {basic.status !== 'verified' && <Button onClick={verifyStudent}>Verify Student</Button>}
-            <Link href={`/admin/students/${studentId}/id-card`}>
-              <Button className="bg-gray-600 hover:bg-gray-700">View ID Card</Button>
-            </Link>
+    <main className="mx-auto w-full max-w-5xl px-4 py-10">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-blue-900 to-blue-700 p-6 text-white">
+        <div>
+          <h1 className="text-2xl font-bold">Hi, {student?.name || "Student"} 👋</h1>
+          <p className="text-sm text-blue-200">Ref: {student?.reference_no} · Status: <span className="capitalize">{student?.status}</span></p>
+        </div>
+        <button onClick={logout} className="rounded-lg bg-white/15 px-4 py-2 text-sm font-medium hover:bg-white/25">Logout</button>
+      </div>
+
+      {/* Enroll & Pay */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-lg font-bold text-gray-900">Programs & Courses</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[...programs.map((p) => ({ ...p, _type: "program" })), ...courses.map((c) => ({ ...c, _type: "course" }))].map((item) => {
+            const price = item._type === "course" ? item.price : item.fee;
+            return (
+              <div key={`${item._type}-${item.id}`} className="flex flex-col rounded-xl border border-gray-200 bg-white p-5">
+                <span className="mb-2 inline-block w-fit rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium capitalize text-blue-800">{item._type}</span>
+                <h3 className="font-semibold text-gray-900">{item.title}</h3>
+                <p className="mt-1 flex-1 text-sm text-gray-500 line-clamp-2">{item.description || ""}</p>
+                <div className="mt-3 text-lg font-bold text-blue-900">{price ? money(price) : "Free"}</div>
+                {Number(item.min_payment) > 0 && <p className="text-xs text-gray-400">Pay min {money(item.min_payment)} to start</p>}
+                <button onClick={() => openPay(item._type, item)} className="mt-3 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600">
+                  Enroll / Pay
+                </button>
+              </div>
+            );
+          })}
+          {programs.length === 0 && courses.length === 0 && (
+            <p className="text-sm text-gray-500">No programs or courses available yet.</p>
+          )}
+        </div>
+      </section>
+
+      {/* Payments history */}
+      <section className="mt-10">
+        <h2 className="mb-3 text-lg font-bold text-gray-900">My Payments</h2>
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-gray-600">
+              <tr><th className="px-4 py-2">Date</th><th className="px-4 py-2">Amount</th><th className="px-4 py-2">For</th><th className="px-4 py-2">Status</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {payments.length === 0 ? (
+                <tr><td colSpan="4" className="px-4 py-4 text-center text-gray-500">No payments yet.</td></tr>
+              ) : payments.map((p) => (
+                <tr key={p.id}>
+                  <td className="px-4 py-2">{new Date(p.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-2">{money(p.amount)}</td>
+                  <td className="px-4 py-2">{p.payment_for_type}</td>
+                  <td className="px-4 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      p.status === "completed" ? "bg-green-100 text-green-800" : p.status === "failed" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"
+                    }`}>{p.status === "pending" ? "awaiting verification" : p.status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Certificates */}
+      <section className="mt-10">
+        <h2 className="mb-3 text-lg font-bold text-gray-900">My Certificates</h2>
+        {certs.length === 0 ? (
+          <p className="text-sm text-gray-500">No certificates issued yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {certs.map((c) => (
+              <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                <p className="font-mono text-xs text-gray-500">{c.certificate_no}</p>
+                <Link href={`/verify/${c.certificate_no}`} className="mt-2 inline-block rounded-lg bg-blue-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800">
+                  View / Download →
+                </Link>
+              </div>
+            ))}
           </div>
-        }
-      />
-
-      <div className="mb-6 border-b border-gray-200">
-        <nav className="-mb-px flex space-x-6">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium ${
-                activeTab === tab.id
-                  ? "border-brand text-brand"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-              }`}
-            >
-              <tab.icon size={16} /> {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* TAB CONTENT */}
-      <div className="space-y-6">
-        {activeTab === 'profile' && (
-          <Card>
-            <h3 className="text-lg font-semibold mb-4">Basic Information</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <DetailItem label="Full Name" value={basic.name} />
-              <DetailItem label="Email" value={basic.email} />
-              <DetailItem label="Phone" value={basic.phone} />
-              <DetailItem label="Admission Status"><StatusBadge status={basic.status} /></DetailItem>
-              <DetailItem label="College" value={basic.college_name} />
-              <DetailItem label="District" value={basic.district_name} />
-              <DetailItem label="Father's Name" value={basic.father_name} />
-              <DetailItem label="Parent's Phone" value={basic.parent_phone} />
-              <DetailItem label="Aadhaar" value={basic.aadhar} />
-              <DetailItem label="PAN" value={basic.pan} />
-              <DetailItem label="Roll Number" value={basic.roll_number} />
-              <DetailItem label="Registered On" value={new Date(basic.created_at).toLocaleDateString()} />
-            </div>
-            <div className="mt-4 pt-4 border-t">
-              <DetailItem label="Permanent Address" value={basic.address_permanent} />
-            </div>
-          </Card>
         )}
+      </section>
 
-        {activeTab === 'payments' && (
-          <Card>
-            <h3 className="text-lg font-semibold mb-4">Financial History</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <DetailItem label="Total Paid"><span className="text-green-600 font-bold">₹{financial.total_paid.toFixed(2)}</span></DetailItem>
-                <DetailItem label="Wallet Balance">₹{financial.wallet_balance.toFixed(2)}</DetailItem>
+      {/* Pay modal */}
+      {payItem && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={closePay}>
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">{payItem.title}</h3>
+              <button onClick={closePay} className="text-gray-400 hover:text-gray-700">✕</button>
             </div>
-            <TableWrap>
-              <thead><tr><Th>Date</Th><Th>Amount</Th><Th>Type</Th><Th>Method</Th><Th>Transaction ID</Th><Th>Status</Th></tr></thead>
-              <tbody>
-                {financial.payments.length > 0 ? financial.payments.map(p => (
-                  <tr key={p.id}>
-                    <Td>{new Date(p.created_at).toLocaleString()}</Td>
-                    <Td>₹{p.amount}</Td>
-                    <Td>{p.payment_for_type}</Td>
-                    <Td>{p.payment_method}</Td>
-                    <Td>{p.transaction_id || 'N/A'}</Td>
-                    <Td><StatusBadge status={p.status} /></Td>
-                  </tr>
-                )) : <tr><Td colSpan="6" className="text-center">No payment history found.</Td></tr>}
-              </tbody>
-            </TableWrap>
-          </Card>
-        )}
 
-        {activeTab === 'courses' && (
-          <Card>
-            <h3 className="text-lg font-semibold mb-4">Learning & Internships</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <h4 className="font-semibold text-gray-700 mb-2">Enrolled Courses</h4>
-                    {learning.courses.length > 0 ? learning.courses.map(c => (
-                        <div key={c.id} className="border-b pb-2 mb-2">
-                            <p className="font-medium">{c.title}</p>
-                            <p className="text-xs text-gray-500">Status: {c.status} | Progress: {c.progress_percent}%</p>
-                        </div>
-                    )) : <p className="text-sm text-gray-500">No courses enrolled.</p>}
+            {msg && <div className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">{msg}</div>}
+
+            {stage === "choose" && (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">Total: <strong>{money(payItem.price)}</strong>{payItem.min > 0 && <> · Minimum: <strong>{money(payItem.min)}</strong></>}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setAmount(String(payItem.price))} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">Full {money(payItem.price)}</button>
+                  {payItem.min > 0 && <button type="button" onClick={() => setAmount(String(payItem.min))} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">Minimum {money(payItem.min)}</button>}
+                  {payItem.price > 0 && <button type="button" onClick={() => setAmount(String(Math.ceil(payItem.price / 2)))} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">Half {money(Math.ceil(payItem.price / 2))}</button>}
                 </div>
-                <div>
-                    <h4 className="font-semibold text-gray-700 mb-2">Internship Programs</h4>
-                    {internships.length > 0 ? internships.map(p => (
-                        <div key={p.id} className="border-b pb-2 mb-2">
-                            <p className="font-medium">{p.program_title}</p>
-                            <p className="text-xs text-gray-500">Status: {p.status}</p>
-                        </div>
-                    )) : <p className="text-sm text-gray-500">No internships enrolled.</p>}
-                </div>
-            </div>
-          </Card>
-        )}
+                <label className="block">
+                  <span className="mb-1 block text-sm font-medium text-gray-700">Amount to pay now (₹)</span>
+                  <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} min={payItem.min || 1} max={payItem.price || undefined}
+                    className="w-full rounded-lg border-2 border-gray-200 px-3 py-2 text-sm focus:border-blue-600 focus:outline-none" />
+                </label>
+                <button onClick={initiate} disabled={busy} className="w-full rounded-lg bg-blue-900 px-4 py-2.5 font-semibold text-white hover:bg-blue-800 disabled:bg-gray-400">
+                  {busy ? "Please wait…" : "Continue to Pay"}
+                </button>
+              </div>
+            )}
 
-        {activeTab === 'documents' && (
-          <Card>
-            <h3 className="text-lg font-semibold mb-4">Uploaded Documents</h3>
-            <TableWrap>
-              <thead><tr><Th>Document Type</Th><Th>Filename</Th><Th>Uploaded On</Th><Th>Status</Th><Th>Actions</Th></tr></thead>
-              <tbody>
-                {learning.documents.length > 0 ? learning.documents.map(d => (
-                  <tr key={d.id}>
-                    <Td className="font-medium">{d.document_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</Td>
-                    <Td>{d.file_name}</Td>
-                    <Td>{new Date(d.uploaded_at).toLocaleDateString()}</Td>
-                    <Td><StatusBadge status={d.status.replace('pending_', '')} /></Td>
-                    <Td>
-                      <a href={d.file_url} target="_blank" rel="noreferrer" className="text-brand hover:underline text-sm font-semibold">
-                        View
-                      </a>
-                    </Td>
-                  </tr>
-                )) : <tr><Td colSpan="5" className="text-center">No documents have been uploaded.</Td></tr>}
-              </tbody>
-            </TableWrap>
-          </Card>
-        )}
-      </div>
-    </>
+            {stage === "pay" && (
+              <form onSubmit={submitProof} className="space-y-4">
+                <div className="rounded-lg bg-blue-50 p-4 text-center">
+                  <p className="text-sm text-blue-800">Pay <strong>{money(dueNow)}</strong> using any UPI app</p>
+                  {payInfo.payment_upi_id && <p className="mt-1 font-mono text-sm font-semibold text-blue-900">{payInfo.payment_upi_id}</p>}
+                  {payInfo.payment_upi_qr_url && <img src={fileHref(payInfo.payment_upi_qr_url)} alt="UPI QR" className="mx-auto mt-3 h-40 w-40 rounded-lg border bg-white object-contain p-1" />}
+                  {payInfo.payment_bank_details && <pre className="mt-3 whitespace-pre-wrap text-left text-xs text-gray-600">{payInfo.payment_bank_details}</pre>}
+                  {!payInfo.payment_upi_id && !payInfo.payment_upi_qr_url && <p className="mt-2 text-xs text-gray-500">Payment details not configured. Please contact support.</p>}
+                </div>
+                <p className="text-xs text-gray-500">After paying, enter your UPI transaction ID and upload a screenshot. Admin will verify and confirm your enrolment.</p>
+                <label className="block">
+                  <span className="mb-1 block text-sm font-medium text-gray-700">UPI Transaction ID</span>
+                  <input value={txnId} onChange={(e) => setTxnId(e.target.value)} className="w-full rounded-lg border-2 border-gray-200 px-3 py-2 text-sm focus:border-blue-600 focus:outline-none" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-sm font-medium text-gray-700">Payment Screenshot *</span>
+                  <input type="file" accept=".png,.jpg,.jpeg,.pdf" onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    className="w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-900 file:px-3 file:py-1.5 file:text-white" />
+                </label>
+                <button type="submit" disabled={busy} className="w-full rounded-lg bg-orange-500 px-4 py-2.5 font-semibold text-white hover:bg-orange-600 disabled:bg-gray-400">
+                  {busy ? "Submitting…" : "Submit for Verification"}
+                </button>
+              </form>
+            )}
+
+            {stage === "done" && (
+              <div className="py-4 text-center">
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-2xl">✓</div>
+                <p className="font-semibold text-gray-900">Submitted!</p>
+                <p className="mt-1 text-sm text-gray-500">Your payment is awaiting admin verification. You'll be enrolled once it's approved.</p>
+                <button onClick={closePay} className="mt-4 rounded-lg bg-blue-900 px-4 py-2 font-semibold text-white hover:bg-blue-800">Done</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </main>
   );
 }

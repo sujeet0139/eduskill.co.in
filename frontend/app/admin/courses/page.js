@@ -6,7 +6,7 @@ import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
 
-const EMPTY = { title: "", category: "", description: "", duration_weeks: "", price: "", language: "English", level: "Beginner", status: "draft" };
+const EMPTY = { title: "", category: "", description: "", duration_weeks: "", price: "", min_payment: "", language: "English", level: "Beginner", status: "draft" };
 
 export default function AdminCourses() {
   const [courses, setCourses] = useState([]);
@@ -77,8 +77,9 @@ export default function AdminCourses() {
           </div>
           <textarea name="description" value={form.description} onChange={change} placeholder="Description"
             className="w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" rows={3} />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <Input label="Price (₹)" type="number" name="price" value={form.price} onChange={change} />
+            <Input label="Min. Pay (₹)" type="number" name="min_payment" value={form.min_payment} onChange={change} />
             <Input label="Language" name="language" value={form.language} onChange={change} />
           </div>
           <div className="grid grid-cols-2 gap-3">

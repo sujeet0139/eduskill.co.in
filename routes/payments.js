@@ -15,30 +15,34 @@ const upload = makeUpload({
 
 // 1. INITIATE A PAYMENT / ENROLLMENT
 router.post('/initiate', async (req, res) => {
-  const { student_id, item_type, item_id, batch_id, payment_plan } = req.body;
+  const { student_id, item_type, item_id, batch_id, payment_plan, amount } = req.body;
   // item_type: 'course', 'program', 'exam', 'registration'
   // payment_plan: 'full', 'split', 'emi'
+  // amount: optional custom amount the student chooses to pay now (>= min, <= total)
 
   try {
     const connection = await pool.getConnection();
 
-    // Get item price
+    // Get item price and the admin-configured minimum first payment
     let itemPrice = 0;
+    let minPayment = 0;
     let itemTitle = '';
     if (item_type === 'registration') {
       itemPrice = 100; // Fixed registration fee
       itemTitle = 'One-time Registration Fee';
     } else if (item_type === 'course') {
-      const [[course]] = await connection.query('SELECT price, title FROM courses WHERE id = ?', [item_id]);
-      itemPrice = course ? course.price : 0;
+      const [[course]] = await connection.query('SELECT price, min_payment, title FROM courses WHERE id = ?', [item_id]);
+      itemPrice = course ? Number(course.price) : 0;
+      minPayment = course ? Number(course.min_payment || 0) : 0;
       itemTitle = course ? course.title : 'Unknown Course';
     } else if (item_type === 'program') {
-      const [[program]] = await connection.query('SELECT fee, title FROM programs WHERE id = ?', [item_id]);
-      itemPrice = program ? program.fee : 0;
+      const [[program]] = await connection.query('SELECT fee, min_payment, title FROM programs WHERE id = ?', [item_id]);
+      itemPrice = program ? Number(program.fee) : 0;
+      minPayment = program ? Number(program.min_payment || 0) : 0;
       itemTitle = program ? program.title : 'Unknown Program';
     } else if (item_type === 'exam') {
       const [[exam]] = await connection.query('SELECT fee, title FROM exams WHERE id = ?', [item_id]);
-      itemPrice = exam ? exam.fee : 0;
+      itemPrice = exam ? Number(exam.fee) : 0;
       itemTitle = exam ? exam.title : 'Unknown Exam';
     }
 
@@ -72,9 +76,27 @@ router.post('/initiate', async (req, res) => {
       return res.json({ success: true, message: 'Enrolled successfully using wallet balance.', payment_type: 'wallet' });
     }
 
-    // Case 2: Payment is required (Calculate upfront cost based on plan)
+    // Case 2: Payment is required.
+    // If the student supplied a custom amount (full / partial / minimum), honour it
+    // after validating it against the admin-set minimum and the total due.
     let upfrontAmount = amountDue;
-    if (payment_plan === 'split') {
+    if (amount !== undefined && amount !== null && amount !== '') {
+      const chosen = Number(amount);
+      if (isNaN(chosen) || chosen <= 0) {
+        connection.release();
+        return res.status(400).json({ error: 'Enter a valid payment amount.' });
+      }
+      const floor = minPayment > 0 ? Math.min(minPayment, amountDue) : 1;
+      if (chosen < floor) {
+        connection.release();
+        return res.status(400).json({ error: `Minimum payment for this is ₹${floor}.` });
+      }
+      if (chosen > amountDue) {
+        connection.release();
+        return res.status(400).json({ error: `Amount cannot exceed the balance due of ₹${amountDue}.` });
+      }
+      upfrontAmount = chosen;
+    } else if (payment_plan === 'split') {
       upfrontAmount = Math.ceil(amountDue / 2); // 50% now
     } else if (payment_plan === 'emi') {
       upfrontAmount = Math.ceil(amountDue / 3); // ~33% now for 3 months
@@ -185,7 +207,7 @@ router.post('/:id/approve', async (req, res) => {
       await connection.query('UPDATE students SET wallet_balance = wallet_balance + ? WHERE id = ?', [amount, student_id]);
     } else if (payment_for_type === 'course') {
       await connection.query('INSERT INTO student_courses (student_id, course_id, status) VALUES (?, ?, "enrolled") ON DUPLICATE KEY UPDATE status="enrolled"', [student_id, payment_for_id]);
-    } else if (item_type === 'program') {
+    } else if (payment_for_type === 'program') {
       await connection.query('INSERT INTO student_programs (student_id, program_id, status) VALUES (?, ?, "enrolled") ON DUPLICATE KEY UPDATE status="enrolled"', [student_id, payment_for_id]);
     }
 
@@ -213,6 +235,42 @@ router.post('/:id/reject', async (req, res) => {
     await connection.query(`UPDATE payments SET status = 'failed', notes = ? WHERE id = ?`, [notes, req.params.id]);
     connection.release();
     res.json({ success: true, message: 'Payment marked as failed/rejected.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 6. ADMIN: GET ALL PAYMENTS (alias of list, used by the admin payments page)
+router.get('/all', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [payments] = await connection.query(
+      `SELECT p.*, s.name, s.email, s.reference_no
+       FROM payments p JOIN students s ON p.student_id = s.id
+       ORDER BY p.created_at DESC`
+    );
+    connection.release();
+    res.json({ success: true, payments });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7. ADMIN: ADD A MANUAL (offline) PAYMENT — recorded as completed
+router.post('/manual', async (req, res) => {
+  const { studentId, amount, referenceNo, paymentDate, item_type, item_id } = req.body;
+  if (!studentId || !amount) {
+    return res.status(400).json({ error: 'Student ID and amount are required.' });
+  }
+  try {
+    const connection = await pool.getConnection();
+    await connection.query(
+      `INSERT INTO payments (student_id, amount, payment_for_type, payment_for_id, payment_method, status, payment_date, transaction_id)
+       VALUES (?, ?, ?, ?, 'bank_transfer', 'completed', ?, ?)`,
+      [studentId, amount, item_type || 'registration', item_id || null, paymentDate || new Date(), referenceNo || null]
+    );
+    connection.release();
+    res.json({ success: true, message: 'Manual payment recorded.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

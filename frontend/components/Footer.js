@@ -1,4 +1,5 @@
 import Link from "next/link";
+import FooterSocials from "@/components/FooterSocials";
 
 export default function Footer() {
   return (
@@ -12,6 +13,7 @@ export default function Footer() {
             <p className="mt-1 text-xs text-gray-400">
               Empowering LNMU Students Since 2024.
             </p>
+            <FooterSocials />
           </div>
           <div className="flex gap-4 text-sm font-medium text-gray-300">
             <Link href="/about" className="hover:text-white">About</Link>

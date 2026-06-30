@@ -1,4 +1,5 @@
 import Link from "next/link";
+import HeroBanner from "@/components/HeroBanner";
 
 const COLLEGES = [
   { name: "Jankidevi College", district: "Darbhanga" },
@@ -64,6 +65,9 @@ const FAQS = [
 export default function HomePage() {
   return (
     <div className="bg-white">
+
+      {/* ADMIN-MANAGED BANNER (shows only if slides exist) */}
+      <HeroBanner />
 
       {/* HERO */}
       <section className="bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 text-white py-20 px-4 text-center">

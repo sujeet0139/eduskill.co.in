@@ -81,6 +81,47 @@ router.post('/:id/questions', async (req, res) => {
   }
 });
 
+// 5. UPDATE EXAM
+router.put('/:id', async (req, res) => {
+  const { title, type, course_id, program_id, passing_score, duration_minutes, fee, has_negative_marking, shuffle_questions, weightage_percent, status } = req.body;
+  try {
+    const connection = await pool.getConnection();
+    await connection.query(
+      `UPDATE exams SET title=?, type=?, course_id=?, program_id=?, passing_score=?, duration_minutes=?, fee=?, has_negative_marking=?, shuffle_questions=?, weightage_percent=?, status=? WHERE id=?`,
+      [title, type, course_id || null, program_id || null, passing_score || 50, duration_minutes || 60, fee || 0, has_negative_marking ? 1 : 0, shuffle_questions ? 1 : 0, weightage_percent || 100, status || 'draft', req.params.id]
+    );
+    connection.release();
+    res.json({ success: true, message: 'Exam updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 6. DELETE EXAM
+router.delete('/:id', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    await connection.query('DELETE FROM exam_questions WHERE exam_id = ?', [req.params.id]);
+    await connection.query('DELETE FROM exams WHERE id = ?', [req.params.id]);
+    connection.release();
+    res.json({ success: true, message: 'Exam deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7. DELETE A QUESTION
+router.delete('/:id/questions/:qid', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    await connection.query('DELETE FROM exam_questions WHERE id = ? AND exam_id = ?', [req.params.qid, req.params.id]);
+    connection.release();
+    res.json({ success: true, message: 'Question deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Note: Endpoints for students to take exams and for admins to grade them would be added here.
 
 module.exports = router;

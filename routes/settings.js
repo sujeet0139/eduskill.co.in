@@ -1,6 +1,33 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { makeUpload, fileUrl } = require('../config/storage');
+
+const qrUpload = makeUpload({
+  folder: 'eduskill/settings',
+  prefix: 'qr-',
+  maxSize: 2 * 1024 * 1024,
+  allowedExt: /jpeg|jpg|png|webp/,
+  allowedMime: ['image/jpeg', 'image/png', 'image/webp'],
+});
+
+// UPLOAD UPI QR CODE IMAGE -> saves the public URL into payment_upi_qr_url
+router.post('/upload-qr', qrUpload.single('qr'), async (req, res) => {
+  const url = fileUrl(req.file);
+  if (!url) return res.status(400).json({ error: 'QR image file is required.' });
+  try {
+    const connection = await pool.getConnection();
+    await connection.query(
+      `INSERT INTO settings (setting_key, setting_value) VALUES ('payment_upi_qr_url', ?)
+       ON DUPLICATE KEY UPDATE setting_value = ?`,
+      [url, url]
+    );
+    connection.release();
+    res.json({ success: true, url });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // GET ALL SETTINGS
 router.get('/', async (req, res) => {

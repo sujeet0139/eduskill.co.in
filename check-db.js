@@ -249,12 +249,15 @@ async function checkDatabase() {
         description TEXT,
         duration_weeks INT,
         price DECIMAL(10,2),
+        min_payment DECIMAL(10,2) DEFAULT 0,
         language VARCHAR(50),
         level VARCHAR(50),
         status ENUM('active', 'draft') DEFAULT 'draft',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await runAlterIfMissing('courses', 'min_payment', "ALTER TABLE courses ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER price");
+    await runAlterIfMissing('programs', 'min_payment', "ALTER TABLE programs ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER fee");
 
     // 7A. BATCHES TABLE (For Courses & Programs)
     await connection.query(`

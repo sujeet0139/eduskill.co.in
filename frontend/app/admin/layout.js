@@ -6,8 +6,7 @@ import { useEffect, useState } from "react";
 import { adminAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 
-// Sidebar grouped by area. More (materials, certificates, announcements,
-// live-classes, exams, admins) to be added in later phases.
+// Sidebar grouped by area.
 const NAV_GROUPS = [
   {
     title: null,
@@ -19,6 +18,7 @@ const NAV_GROUPS = [
       { href: "/admin/students", label: "Students" },
       { href: "/admin/teachers", label: "Teachers" },
       { href: "/admin/faculty", label: "Faculty" },
+      { href: "/admin/admins", label: "Admin Users" },
     ],
   },
   {
@@ -27,6 +27,8 @@ const NAV_GROUPS = [
       { href: "/admin/courses", label: "Courses" },
       { href: "/admin/programs", label: "Programs" },
       { href: "/admin/materials", label: "Study Materials" },
+      { href: "/admin/live-classes", label: "Live Classes" },
+      { href: "/admin/exams", label: "Exams" },
       { href: "/admin/certificates", label: "Certificates" },
     ],
   },
@@ -36,6 +38,13 @@ const NAV_GROUPS = [
       { href: "/admin/colleges", label: "Colleges" },
       { href: "/admin/districts", label: "Cities / Districts" },
       { href: "/admin/departments", label: "Departments" },
+    ],
+  },
+  {
+    title: "Site & Content",
+    items: [
+      { href: "/admin/hero-slides", label: "Hero Banner" },
+      { href: "/admin/announcements", label: "Announcements" },
     ],
   },
   {
