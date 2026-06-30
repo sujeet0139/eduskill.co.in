@@ -46,11 +46,20 @@ router.post('/initiate', async (req, res) => {
       itemTitle = exam ? exam.title : 'Unknown Exam';
     }
 
+    // How much has the student already paid (and had approved) for THIS item?
+    const [[paidRow]] = await connection.query(
+      `SELECT COALESCE(SUM(amount), 0) AS paid FROM payments
+       WHERE student_id = ? AND payment_for_type = ? AND payment_for_id = ? AND status = 'completed'`,
+      [student_id, item_type, item_id || null]
+    );
+    const alreadyPaid = Number(paidRow.paid || 0);
+    const remainingPrice = Math.max(0, itemPrice - alreadyPaid);
+
     // Get student wallet balance
     const [[student]] = await connection.query('SELECT wallet_balance FROM students WHERE id = ?', [student_id]);
-    const walletBalance = student ? student.wallet_balance : 0;
+    const walletBalance = student ? Number(student.wallet_balance) : 0;
 
-    const amountDue = itemPrice - walletBalance;
+    const amountDue = remainingPrice - walletBalance;
 
     // Case 1: Wallet covers the full cost
     if (amountDue <= 0) {
@@ -86,7 +95,9 @@ router.post('/initiate', async (req, res) => {
         connection.release();
         return res.status(400).json({ error: 'Enter a valid payment amount.' });
       }
-      const floor = minPayment > 0 ? Math.min(minPayment, amountDue) : 1;
+      // The minimum only applies to the FIRST payment; once something is paid,
+      // the student can pay any remaining amount.
+      const floor = alreadyPaid > 0 ? 1 : (minPayment > 0 ? Math.min(minPayment, amountDue) : 1);
       if (chosen < floor) {
         connection.release();
         return res.status(400).json({ error: `Minimum payment for this is ₹${floor}.` });

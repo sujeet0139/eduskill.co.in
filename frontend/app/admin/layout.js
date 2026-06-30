@@ -26,6 +26,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/courses", label: "Courses" },
       { href: "/admin/programs", label: "Programs" },
+      { href: "/admin/batches", label: "Batches" },
       { href: "/admin/materials", label: "Study Materials" },
       { href: "/admin/live-classes", label: "Live Classes" },
       { href: "/admin/exams", label: "Exams" },

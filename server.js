@@ -142,6 +142,9 @@ app.use('/api/live-classes', requireAdmin, liveClassesRouter);
 const examsRouter = require('./routes/exams');
 app.use('/api/exams', requireAdmin, examsRouter);
 
+const batchesRouter = require('./routes/batches');
+app.use('/api/batches', requireAdmin, batchesRouter);
+
 const heroSlidesRouter = require('./routes/hero-slides');
 app.use('/api/hero-slides', requireAdmin, heroSlidesRouter);
 

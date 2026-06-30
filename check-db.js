@@ -257,6 +257,8 @@ async function checkDatabase() {
       )
     `);
     await runAlterIfMissing('courses', 'min_payment', "ALTER TABLE courses ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER price");
+    await runAlterIfMissing('courses', 'content_pdf', "ALTER TABLE courses ADD COLUMN content_pdf VARCHAR(255) AFTER description");
+    await runAlterIfMissing('courses', 'subject', "ALTER TABLE courses ADD COLUMN subject VARCHAR(150) AFTER category");
     await runAlterIfMissing('programs', 'min_payment', "ALTER TABLE programs ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER fee");
 
     // 7A. BATCHES TABLE (For Courses & Programs)
