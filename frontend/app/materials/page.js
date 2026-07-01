@@ -58,7 +58,7 @@ export default function MaterialsPage() {
               <h3 className="font-semibold text-gray-900">{m.title}</h3>
               {m.description && <p className="mt-1 flex-1 text-sm text-gray-500">{m.description}</p>}
               <a
-                href={m.file_path}
+                href={api.mediaUrl(m.file_path)}
                 target="_blank"
                 rel="noreferrer"
                 className="mt-4 inline-block rounded-lg bg-blue-900 px-4 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-blue-800"

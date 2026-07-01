@@ -65,7 +65,7 @@ export default function AdminHeroSlides() {
             <tr><Td className="text-gray-500">No slides yet.</Td></tr>
           ) : slides.map((s) => (
             <tr key={s.id} className="hover:bg-gray-50">
-              <Td>{s.image_url ? <img src={s.image_url} alt={s.alt_text || ""} className="h-10 w-20 rounded object-cover" /> : "—"}</Td>
+              <Td>{s.image_url ? <img src={api.mediaUrl(s.image_url)} alt={s.alt_text || ""} className="h-10 w-20 rounded object-cover" /> : "—"}</Td>
               <Td className="font-medium">{s.title || <span className="text-gray-400">(no title)</span>}</Td>
               <Td>{s.order_no}</Td>
               <Td><StatusBadge status={s.is_active ? "active" : "draft"} /></Td>

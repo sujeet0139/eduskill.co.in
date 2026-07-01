@@ -27,7 +27,7 @@ export default function HeroBanner() {
   return (
     <section className="relative h-56 w-full overflow-hidden bg-blue-950 sm:h-80 md:h-96">
       {s.image_url && (
-        <img src={s.image_url} alt={s.alt_text || s.title || "banner"} className="absolute inset-0 h-full w-full object-cover" />
+        <img src={api.mediaUrl(s.image_url)} alt={s.alt_text || s.title || "banner"} className="absolute inset-0 h-full w-full object-cover" />
       )}
       {(s.title || s.subtitle || s.cta_text) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 px-4 text-center text-white">

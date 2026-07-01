@@ -64,7 +64,7 @@ export default function AdminMaterials() {
               <Td className="font-medium">{m.title}</Td>
               <Td>{m.category || "—"}</Td>
               <Td>
-                <a href={m.file_path} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">View</a>
+                <a href={api.mediaUrl(m.file_path)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">View</a>
               </Td>
               <Td><StatusBadge status={m.is_active ? "active" : "draft"} /></Td>
               <Td>

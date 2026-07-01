@@ -82,6 +82,10 @@ async function checkDatabase() {
     // This pattern is safer than try/catch(e){}
     await runAlterIfMissing('colleges', 'college_code', "ALTER TABLE colleges ADD COLUMN college_code VARCHAR(50) UNIQUE");
     await runAlterIfMissing('colleges', 'district_id', "ALTER TABLE colleges ADD COLUMN district_id INT");
+    await runAlterIfMissing('colleges', 'state', "ALTER TABLE colleges ADD COLUMN state VARCHAR(50) DEFAULT 'Bihar'");
+    await runAlterIfMissing('colleges', 'address', "ALTER TABLE colleges ADD COLUMN address TEXT");
+    await runAlterIfMissing('colleges', 'contact_no', "ALTER TABLE colleges ADD COLUMN contact_no VARCHAR(50)");
+    await runAlterIfMissing('colleges', 'principal_details', "ALTER TABLE colleges ADD COLUMN principal_details TEXT");
     // Note: Checking for foreign keys is more complex, so the original try/catch is acceptable here for simplicity.
     try { await connection.query("ALTER TABLE colleges ADD CONSTRAINT fk_district FOREIGN KEY (district_id) REFERENCES districts(id) ON DELETE SET NULL"); } catch(e){}
 
@@ -154,6 +158,8 @@ async function checkDatabase() {
     await runAlterIfMissing('students', 'wallet_balance', "ALTER TABLE students ADD COLUMN wallet_balance DECIMAL(10,2) DEFAULT 0.00");
     await runAlterIfMissing('students', 'department_id', "ALTER TABLE students ADD COLUMN department_id INT");
     await runAlterIfMissing('students', 'department', "ALTER TABLE students ADD COLUMN department VARCHAR(150) AFTER department_id");
+    await runAlterIfMissing('students', 'aadhar', "ALTER TABLE students ADD COLUMN aadhar VARCHAR(255) AFTER phone");
+    await runAlterIfMissing('students', 'pan', "ALTER TABLE students ADD COLUMN pan VARCHAR(255) AFTER aadhar");
     await runAlterIfMissing('students', 'father_name', "ALTER TABLE students ADD COLUMN father_name VARCHAR(100) AFTER department_id");
     await runAlterIfMissing('students', 'mother_name', "ALTER TABLE students ADD COLUMN mother_name VARCHAR(100) AFTER father_name");
     await runAlterIfMissing('students', 'parent_phone', "ALTER TABLE students ADD COLUMN parent_phone VARCHAR(50) AFTER mother_name");

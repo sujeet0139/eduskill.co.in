@@ -37,8 +37,18 @@ async function request(path, { method = "GET", body, token, isForm } = {}) {
   return data;
 }
 
+// Resolve an uploaded file path to an absolute URL. Uploads are stored on the
+// API server as "/uploads/..."; served from the frontend origin they 404, so
+// prefix the API base. Full http(s) URLs (e.g. Cloudinary) are returned as-is.
+function mediaUrl(p) {
+  if (!p) return "";
+  if (/^https?:\/\//.test(p)) return p;
+  return `${BASE}${p.startsWith("/") ? "" : "/"}${p}`;
+}
+
 export const api = {
   base: BASE,
+  mediaUrl,
   get: (p, token) => request(p, { token }),
   post: (p, body, token) => request(p, { method: "POST", body, token }),
   put: (p, body, token) => request(p, { method: "PUT", body, token }),

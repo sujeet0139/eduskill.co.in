@@ -1,8 +1,6 @@
 import { Inter } from "next/font/google";
 import "./globals.css";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer"; // Corrected component name casing
-import TopTicker from "@/components/TopTicker";
+import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -25,10 +23,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={inter.className}>
-        <TopTicker />
-        <Navbar />
+        <SiteHeader />
         <main>{children}</main>
-        <Footer />
+        <SiteFooter />
       </body>
     </html>
   );

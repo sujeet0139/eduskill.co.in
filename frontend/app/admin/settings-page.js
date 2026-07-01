@@ -268,7 +268,7 @@ export default function SettingsPage() {
                       {qrUploading && <span className="text-xs text-gray-500">Uploading…</span>}
                     </div>
                     {settings.payment_upi_qr_url && (
-                      <img src={settings.payment_upi_qr_url} alt="UPI QR" className="mt-3 h-32 w-32 rounded-lg border object-contain p-1" />
+                      <img src={api.mediaUrl(settings.payment_upi_qr_url)} alt="UPI QR" className="mt-3 h-32 w-32 rounded-lg border object-contain p-1" />
                     )}
                     <p className="text-xs text-gray-500 mt-1">Upload an image or paste a URL. Shown to students on the pay screen.</p>
                   </div>
