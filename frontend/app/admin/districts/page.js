@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { name: "", code: "" };
 
@@ -15,6 +16,7 @@ export default function AdminDistricts() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => api.get("/api/districts", token()).then((d) => setDistricts(d.districts || [])).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -29,11 +31,11 @@ export default function AdminDistricts() {
       if (editId) await api.put(`/api/districts/${editId}`, form, token());
       else await api.post("/api/districts", form, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this city/district?")) return;
-    try { await api.del(`/api/districts/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this city/district?"))) return;
+    try { await api.del(`/api/districts/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

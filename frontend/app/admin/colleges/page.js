@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = {
   name: "",
@@ -25,6 +26,7 @@ export default function AdminColleges() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/colleges", token()).then((d) => setColleges(d.colleges || [])).catch((e) => setError(e.message));
@@ -45,11 +47,11 @@ export default function AdminColleges() {
       if (editId) await api.put(`/api/colleges/${editId}`, form, token());
       else await api.post("/api/colleges", form, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this college? Students linked to it may also be removed.")) return;
-    try { await api.del(`/api/colleges/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this college? Students linked to it may also be removed."))) return;
+    try { await api.del(`/api/colleges/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   const filtered = colleges.filter((c) =>

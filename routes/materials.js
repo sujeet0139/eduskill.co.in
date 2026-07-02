@@ -14,9 +14,9 @@ const upload = makeUpload({
   allowedMime: ['image/jpeg', 'image/png', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
 });
 
-// ADMIN: UPLOAD STUDY MATERIAL
+// ADMIN: UPLOAD STUDY MATERIAL (optionally tagged to a course / program / subject)
 router.post('/upload', requireAdmin, upload.single('document'), async (req, res) => {
-  const { title, description, category } = req.body;
+  const { title, description, category, course_id, program_id, subject } = req.body;
   const filePath = fileUrl(req.file);
 
   try {
@@ -24,8 +24,8 @@ router.post('/upload', requireAdmin, upload.single('document'), async (req, res)
 
     const connection = await pool.getConnection();
     await connection.query(
-      'INSERT INTO study_materials (title, description, category, file_path) VALUES (?, ?, ?, ?)',
-      [title, description || null, category || null, filePath]
+      'INSERT INTO study_materials (title, description, category, course_id, program_id, subject, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [title, description || null, category || null, course_id || null, program_id || null, subject || null, filePath]
     );
     connection.release();
 
@@ -35,11 +35,26 @@ router.post('/upload', requireAdmin, upload.single('document'), async (req, res)
   }
 });
 
-// PUBLIC/STUDENT: GET ACTIVE STUDY MATERIALS
+// Build a SELECT that joins course/program titles + supports filters.
+function materialsQuery(extraWhere = '', activeOnly = true) {
+  return `SELECT m.*, c.title AS course_title, p.title AS program_title
+          FROM study_materials m
+          LEFT JOIN courses c ON m.course_id = c.id
+          LEFT JOIN programs p ON m.program_id = p.id
+          WHERE 1=1 ${activeOnly ? 'AND m.is_active = TRUE' : ''} ${extraWhere}
+          ORDER BY m.created_at DESC`;
+}
+
+// PUBLIC: GET ACTIVE *GENERAL* STUDY MATERIALS (untagged). Course/program-tagged
+// materials are private to enrolled students (served by /api/student-dashboard/materials).
 router.get('/', async (req, res) => {
+  const { subject } = req.query;
+  const where = ['AND m.course_id IS NULL AND m.program_id IS NULL'];
+  const params = [];
+  if (subject) { where.push('AND m.subject = ?'); params.push(subject); }
   try {
     const connection = await pool.getConnection();
-    const [materials] = await connection.query('SELECT * FROM study_materials WHERE is_active = TRUE ORDER BY created_at DESC');
+    const [materials] = await connection.query(materialsQuery(where.join(' ')), params);
     connection.release();
     res.json({ success: true, materials });
   } catch (error) {
@@ -47,11 +62,11 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ADMIN: GET ALL STUDY MATERIALS (including disabled)
+// ADMIN: GET ALL STUDY MATERIALS (including disabled), with course/program titles
 router.get('/all', requireAdmin, async (req, res) => {
   try {
     const connection = await pool.getConnection();
-    const [materials] = await connection.query('SELECT * FROM study_materials ORDER BY created_at DESC');
+    const [materials] = await connection.query(materialsQuery('', false));
     connection.release();
     res.json({ success: true, materials });
   } catch (error) {
@@ -61,7 +76,7 @@ router.get('/all', requireAdmin, async (req, res) => {
 
 // ADMIN: TOGGLE ACTIVE / UPDATE METADATA
 router.put('/:id', requireAdmin, async (req, res) => {
-  const { title, description, category, is_active } = req.body;
+  const { title, description, category, is_active, course_id, program_id, subject } = req.body;
   try {
     const connection = await pool.getConnection();
     const [[existing]] = await connection.query('SELECT * FROM study_materials WHERE id = ?', [req.params.id]);
@@ -70,11 +85,14 @@ router.put('/:id', requireAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Material not found' });
     }
     await connection.query(
-      'UPDATE study_materials SET title = ?, description = ?, category = ?, is_active = ? WHERE id = ?',
+      'UPDATE study_materials SET title = ?, description = ?, category = ?, course_id = ?, program_id = ?, subject = ?, is_active = ? WHERE id = ?',
       [
         title ?? existing.title,
         description ?? existing.description,
         category ?? existing.category,
+        course_id !== undefined ? (course_id || null) : existing.course_id,
+        program_id !== undefined ? (program_id || null) : existing.program_id,
+        subject !== undefined ? (subject || null) : existing.subject,
         is_active !== undefined ? (is_active ? 1 : 0) : existing.is_active,
         req.params.id,
       ]

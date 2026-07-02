@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = {
   title: "", topic: "", mentor_id: "", course_id: "", college_id: "",
@@ -22,6 +23,7 @@ export default function AdminLiveClasses() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/live-classes", token()).then((d) => setClasses(d.classes || [])).catch((e) => setError(e.message));
@@ -46,8 +48,24 @@ export default function AdminLiveClasses() {
       if (editId) await api.put(`/api/live-classes/${editId}`, form, token());
       else await api.post("/api/live-classes", form, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
+  };
+
+  // Open WhatsApp with a pre-filled class invite (admin picks the recipient/group).
+  const shareWhatsApp = (c) => {
+    const when = c.scheduled_at ? new Date(c.scheduled_at).toLocaleString() : "soon";
+    const text = `📚 Live Class: ${c.title}\n${c.topic ? `Topic: ${c.topic}\n` : ""}🕒 ${when}\n🔗 Join: ${c.meet_link || "(link to be shared)"}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
+  // Email the meeting link to all registered (verified) students for this class.
+  const emailLink = async (c) => {
+    if (!c.meet_link) { notify.toast("Add a meeting link to this class first."); return; }
+    if (!(await notify.confirm("Email the meeting link to all registered students for this class?"))) return;
+    try {
+      const res = await api.post(`/api/live-classes/${c.id}/notify-link`, {}, token());
+      notify.success(res.message || "Sent.");
+    } catch (err) { notify.error(err.message); }
   };
 
   return (
@@ -70,8 +88,10 @@ export default function AdminLiveClasses() {
               <Td>{c.present_count ?? 0}</Td>
               <Td><StatusBadge status={c.status === "completed" ? "completed" : c.status === "cancelled" ? "revoked" : "active"} /></Td>
               <Td>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {c.meet_link && <a href={c.meet_link} target="_blank" rel="noreferrer" className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-700 hover:bg-blue-200">Join</a>}
+                  <button onClick={() => shareWhatsApp(c)} className="rounded bg-green-100 px-2 py-1 text-xs text-green-700 hover:bg-green-200">WhatsApp</button>
+                  <button onClick={() => emailLink(c)} className="rounded bg-orange-100 px-2 py-1 text-xs text-orange-700 hover:bg-orange-200">Email Link</button>
                   <button onClick={() => openEdit(c)} className="rounded bg-gray-100 px-2 py-1 text-xs hover:bg-gray-200">Edit</button>
                 </div>
               </Td>

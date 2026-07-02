@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { name: "", course_id: "", program_id: "", mentor_id: "", start_date: "", end_date: "", max_students: 30, status: "open" };
 
@@ -19,6 +20,7 @@ export default function AdminBatches() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/batches", token()).then((d) => setBatches(d.batches || [])).catch((e) => setError(e.message));
@@ -38,17 +40,21 @@ export default function AdminBatches() {
 
   const save = async (e) => {
     e.preventDefault();
+    if (form.start_date && form.end_date && new Date(form.end_date) < new Date(form.start_date)) {
+      notify.error("End date must be on or after the start date.");
+      return;
+    }
     setSaving(true);
     try {
       if (editId) await api.put(`/api/batches/${editId}`, form, token());
       else await api.post("/api/batches", form, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this batch?")) return;
-    try { await api.del(`/api/batches/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this batch?"))) return;
+    try { await api.del(`/api/batches/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (
@@ -101,7 +107,7 @@ export default function AdminBatches() {
           </Select>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Start Date" type="date" name="start_date" value={form.start_date} onChange={change} />
-            <Input label="End Date" type="date" name="end_date" value={form.end_date} onChange={change} />
+            <Input label="End Date" type="date" name="end_date" value={form.end_date} onChange={change} min={form.start_date || undefined} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Max Students" type="number" name="max_students" value={form.max_students} onChange={change} />

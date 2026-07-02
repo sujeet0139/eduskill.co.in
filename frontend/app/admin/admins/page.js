@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { name: "", email: "", password: "", role: "moderator", is_active: 1 };
 
@@ -16,6 +17,7 @@ export default function AdminUsers() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => api.get("/api/admins", token()).then((d) => setAdmins(d.admins || [])).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -31,11 +33,11 @@ export default function AdminUsers() {
       if (editId) {
         await api.put(`/api/admins/${editId}`, { name: form.name, email: form.email, role: form.role, is_active: Number(form.is_active) ? 1 : 0 }, token());
       } else {
-        if (!form.password) { alert("Password is required for a new admin."); setSaving(false); return; }
+        if (!form.password) { notify.error("Password is required for a new admin."); setSaving(false); return; }
         await api.post("/api/admins", { name: form.name, email: form.email, password: form.password, role: form.role }, token());
       }
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
   };
 

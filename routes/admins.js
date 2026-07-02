@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
+const { requireAdmin } = require('../middleware/authMiddleware');
 
 // GET ALL ADMINS
 router.get('/', async (req, res) => {
@@ -41,6 +42,25 @@ router.put('/:id', async (req, res) => {
     await connection.query('UPDATE admin_users SET name=?, email=?, role=?, is_active=? WHERE id=?', [name, email, role, is_active ? 1 : 0, req.params.id]);
     connection.release();
     res.json({ success: true, message: 'Admin user updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// SET / UPDATE AN ADMIN'S PASSWORD
+router.put('/:id/password', requireAdmin, async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+  try {
+    const connection = await pool.getConnection();
+    const [[admin]] = await connection.query('SELECT id FROM admin_users WHERE id = ?', [req.params.id]);
+    if (!admin) { connection.release(); return res.status(404).json({ error: 'Admin not found.' }); }
+    const hash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    await connection.query('UPDATE admin_users SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
+    connection.release();
+    res.json({ success: true, message: 'Admin password updated successfully.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -80,6 +80,72 @@ router.put('/registration', requireAdmin, async (req, res) => {
   }
 });
 
+// REORDER FIELDS — body { order: [id1, id2, ...] } in the desired display order.
+// Defined before "/registration/:id" so "reorder" isn't captured as an :id.
+router.put('/registration/reorder', requireAdmin, async (req, res) => {
+  const { order } = req.body;
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order must be an array of field ids.' });
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    for (let i = 0; i < order.length; i++) {
+      await connection.query('UPDATE registration_fields SET order_no = ? WHERE id = ?', [i, order[i]]);
+    }
+    await connection.commit();
+    connection.release();
+    res.json({ success: true, message: 'Field order updated.' });
+  } catch (error) {
+    if (connection) { await connection.rollback(); connection.release(); }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// EDIT A SINGLE FIELD. Label/enabled/mandatory are editable for all fields.
+// Type & options can only change for CUSTOM (non-standard) fields to protect
+// system fields like email/password.
+router.put('/registration/:id', requireAdmin, async (req, res) => {
+  const { label, is_mandatory, is_enabled, type, options } = req.body;
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [[field]] = await connection.query('SELECT * FROM registration_fields WHERE id = ?', [req.params.id]);
+    if (!field) { connection.release(); return res.status(404).json({ error: 'Field not found.' }); }
+
+    // Resolve final type + options (only custom fields may change type/options).
+    let finalType = field.type;
+    let finalOptions = field.options;
+    if (!field.is_standard) {
+      if (type) finalType = type;
+      if (finalType === 'select') {
+        const list = Array.isArray(options) ? options : String(options || '').split(/\r?\n|,/);
+        const cleaned = list.map((o) => String(o).trim()).filter(Boolean);
+        if (cleaned.length === 0) { connection.release(); return res.status(400).json({ error: 'A dropdown field needs at least one option.' }); }
+        finalOptions = JSON.stringify(cleaned);
+      } else {
+        finalOptions = null;
+      }
+    }
+
+    await connection.query(
+      'UPDATE registration_fields SET label = ?, is_mandatory = ?, is_enabled = ?, type = ?, options = ? WHERE id = ?',
+      [
+        label ?? field.label,
+        is_mandatory !== undefined ? (is_mandatory ? 1 : 0) : field.is_mandatory,
+        is_enabled !== undefined ? (is_enabled ? 1 : 0) : field.is_enabled,
+        finalType,
+        finalOptions,
+        req.params.id,
+      ]
+    );
+    connection.release();
+    res.json({ success: true, message: 'Field updated.' });
+  } catch (error) {
+    if (connection) connection.release();
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // DELETE A CUSTOM FIELD
 router.delete('/registration/:id', requireAdmin, async (req, res) => {
   const fieldId = req.params.id;

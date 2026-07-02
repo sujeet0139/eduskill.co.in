@@ -1,6 +1,8 @@
 import Link from "next/link";
 import HeroBanner from "@/components/HeroBanner";
 import LiveStats from "@/components/LiveStats";
+import EligibleColleges from "@/components/EligibleColleges";
+import CourseCatalog from "@/components/CourseCatalog";
 
 const COLLEGES = [
   { name: "Jankidevi College", district: "Darbhanga" },
@@ -255,39 +257,7 @@ export default function HomePage() {
           <span className="inline-block bg-blue-50 text-blue-900 px-4 py-1 rounded-full text-xs font-semibold mb-3">Skill Programs</span>
           <h2 className="text-3xl font-bold text-gray-900 mb-3">Online Training Courses</h2>
           <p className="text-gray-500 mb-10 max-w-sm mx-auto">Learn in-demand skills at your own pace in Hindi and English.</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            {COURSES.map((c) => (
-              <div key={c.title} className="border border-gray-200 rounded-2xl overflow-hidden hover:shadow-lg transition hover:-translate-y-1">
-                <div className={`bg-gradient-to-br ${c.color} text-white p-6`}>
-                  <div className="text-4xl mb-3">{c.icon}</div>
-                  <h3 className="text-xl font-bold mb-1">{c.title}</h3>
-                  <p className="text-sm opacity-80">{c.desc}</p>
-                </div>
-                <div className="p-5">
-                  <div className="flex gap-2 mb-4 flex-wrap">
-                    <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs">{c.weeks}</span>
-                    <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs">Beginner</span>
-                    <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs">Hindi + English</span>
-                  </div>
-                  <div className="text-2xl font-bold text-blue-900 mb-4">
-                    {c.price} <span className="text-sm text-gray-400 line-through font-normal">{c.original}</span>
-                  </div>
-                  <ul className="mb-5 space-y-1.5">
-                    {c.includes.map((item) => (
-                      <li key={item} className="text-sm text-gray-500 flex items-center gap-2">
-                        <span className="text-green-500 font-bold text-xs">✓</span>{item}
-                      </li>
-                    ))}
-                  </ul>
-                  <Link href="/register">
-                    <button className={`w-full ${c.btn} text-white py-3 rounded-lg font-semibold text-sm hover:opacity-90`}>
-                      Enroll Now
-                    </button>
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
+          <CourseCatalog fallback={COURSES} />
           <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl p-6 text-white flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-left">
               <div className="text-lg font-bold mb-1">🎯 All 3 Courses Bundle</div>
@@ -312,14 +282,7 @@ export default function HomePage() {
           <span className="inline-block bg-orange-500/20 text-orange-300 px-4 py-1 rounded-full text-xs font-semibold mb-3">LNMU Affiliated</span>
           <h2 className="text-3xl font-bold mb-3">Eligible Colleges</h2>
           <p className="text-gray-400 mb-10 max-w-sm mx-auto">EduSkill is open to students from these 8 LNMU-affiliated colleges in Bihar.</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {COLLEGES.map((c) => (
-              <div key={c.name} className="bg-white/5 border border-white/10 rounded-xl p-4 text-left">
-                <div className="font-semibold text-white text-sm mb-1">{c.name}</div>
-                <div className="text-gray-400 text-xs">{c.district}, Bihar</div>
-              </div>
-            ))}
-          </div>
+          <EligibleColleges fallback={COLLEGES} />
           <p className="mt-6 text-sm text-gray-500">
             Don't see your college?{" "}
             <Link href="/contact" className="text-orange-400 hover:underline">Contact us</Link> — we're expanding.

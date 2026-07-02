@@ -31,15 +31,34 @@ router.get('/registration-form', async (req, res) => {
   }
 });
 
-// GET /api/public/colleges - Fetch all colleges for dropdowns
+// GET /api/public/colleges - Fetch all colleges for dropdowns + homepage list
 router.get('/colleges', async (req, res) => {
   try {
     const connection = await pool.getConnection();
-    const [colleges] = await connection.query('SELECT id, name FROM colleges ORDER BY name ASC');
+    const [colleges] = await connection.query(
+      `SELECT c.id, c.name, d.name AS district
+       FROM colleges c LEFT JOIN districts d ON c.district_id = d.id
+       ORDER BY c.name ASC`
+    );
     connection.release();
     res.json({ success: true, colleges });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch colleges', details: error.message });
+  }
+});
+
+// GET /api/public/courses - Published courses for the homepage / catalog
+router.get('/courses', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [courses] = await connection.query(
+      `SELECT id, title, category, subject, description, duration_weeks, price, language, level
+       FROM courses WHERE status = 'published' ORDER BY created_at DESC`
+    );
+    connection.release();
+    res.json({ success: true, courses });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch courses', details: error.message });
   }
 });
 

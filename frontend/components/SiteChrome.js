@@ -8,7 +8,8 @@ import TopTicker from "@/components/TopTicker";
 // The public marketing chrome (ticker + navbar + footer) should NOT appear on
 // the admin panel — the admin has its own layout/sidebar. Hidden on /admin/*.
 function isAdmin(pathname) {
-  return pathname === "/admin" || (pathname || "").startsWith("/admin/");
+  const p = pathname || "";
+  return p === "/admin" || p.startsWith("/admin/") || p === "/teacher" || p.startsWith("/teacher/");
 }
 
 export function SiteHeader() {

@@ -8,7 +8,20 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Storage mode is decided purely by whether CLOUDINARY_URL is set:
+//   - set   -> uploads stream to Cloudinary (returns absolute https URLs)
+//   - blank -> uploads are written to local server disk under LOCAL_UPLOAD_DIR
+// This lets the operator switch modes with a single env var, no code change.
 const cloudEnabled = !!process.env.CLOUDINARY_URL;
+
+// The one true local uploads directory. Absolute so it does NOT depend on the
+// process working directory (pm2, cron, etc. may start elsewhere). Both the
+// upload writer (below) and the static file server (server.js) use this same
+// path, so a file that is written is always served back from the same place.
+// Override with UPLOAD_DIR to point at a mounted disk / larger hosting volume.
+const LOCAL_UPLOAD_DIR = process.env.UPLOAD_DIR
+  ? path.resolve(process.env.UPLOAD_DIR)
+  : (process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : path.join(__dirname, '..', 'uploads'));
 
 let cloudinary, CloudinaryStorage;
 if (cloudEnabled) {
@@ -39,13 +52,12 @@ function makeUpload({ folder = 'eduskill', prefix = 'file', maxSize = 5 * 1024 *
       }
     });
   } else {
-    // Local dev (or any non-serverless host): write to disk. On Vercel the only
-    // writable location is the OS temp dir, but uploads there will not persist —
-    // configure CLOUDINARY_URL for production.
-    const dir = process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : 'uploads';
-    try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { /* best effort */ }
+    // Write to local server disk. Uses the shared absolute LOCAL_UPLOAD_DIR so
+    // files land exactly where server.js serves them from. Persistent on a
+    // normal VPS; on Vercel this is the ephemeral temp dir (use Cloudinary there).
+    try { fs.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true }); } catch (e) { /* best effort */ }
     storage = multer.diskStorage({
-      destination: (req, file, cb) => cb(null, dir),
+      destination: (req, file, cb) => cb(null, LOCAL_UPLOAD_DIR),
       filename: (req, file, cb) => cb(null, prefix + Date.now() + path.extname(file.originalname))
     });
   }
@@ -71,4 +83,4 @@ function fileUrl(file) {
   return '/uploads/' + file.filename;
 }
 
-module.exports = { makeUpload, fileUrl, cloudEnabled };
+module.exports = { makeUpload, fileUrl, cloudEnabled, LOCAL_UPLOAD_DIR };

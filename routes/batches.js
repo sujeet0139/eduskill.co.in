@@ -2,6 +2,17 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+// Validate a batch's date range. Returns an error string, or null if OK.
+// Both dates are optional, but if both are present end must be after start.
+function validateBatchDates(start_date, end_date) {
+  if (start_date && isNaN(Date.parse(start_date))) return 'Invalid start date.';
+  if (end_date && isNaN(Date.parse(end_date))) return 'Invalid end date.';
+  if (start_date && end_date && new Date(end_date) < new Date(start_date)) {
+    return 'End date must be on or after the start date.';
+  }
+  return null;
+}
+
 // GET ALL BATCHES (with course/program/mentor names)
 router.get('/', async (req, res) => {
   try {
@@ -25,6 +36,8 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const { name, course_id, program_id, mentor_id, start_date, end_date, max_students, status } = req.body;
   try {
+    const dateErr = validateBatchDates(start_date, end_date);
+    if (dateErr) return res.status(400).json({ error: dateErr });
     const connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO batches (name, course_id, program_id, mentor_id, start_date, end_date, max_students, status)
@@ -42,6 +55,8 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { name, course_id, program_id, mentor_id, start_date, end_date, max_students, status } = req.body;
   try {
+    const dateErr = validateBatchDates(start_date, end_date);
+    if (dateErr) return res.status(400).json({ error: dateErr });
     const connection = await pool.getConnection();
     await connection.query(
       `UPDATE batches SET name=?, course_id=?, program_id=?, mentor_id=?, start_date=?, end_date=?, max_students=?, status=? WHERE id=?`,

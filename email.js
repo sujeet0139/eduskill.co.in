@@ -125,4 +125,4 @@ async function sendPasswordResetEmail(studentEmail, studentName, resetToken) {
   }
 }
 
-module.exports = { sendWelcomeEmail, sendClassReminderEmail, sendClassMaterialsEmail, sendPaymentConfirmationEmail, sendPasswordResetEmail };
+module.exports = { send, sendWelcomeEmail, sendClassReminderEmail, sendClassMaterialsEmail, sendPaymentConfirmationEmail, sendPasswordResetEmail };

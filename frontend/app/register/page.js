@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { validateStudentForm } from "@/lib/validators";
 
 // Parse a field's `options` column which may arrive as a JSON string, an array
 // of strings, or an array of { value, label } objects.
@@ -62,6 +63,12 @@ export default function RegisterPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const validationError = validateStudentForm(formData);
+    if (validationError) {
+      setError(validationError);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await api.post("/api/students/register", formData);
@@ -183,6 +190,14 @@ export default function RegisterPage() {
       );
     }
 
+    // Per-field input hints for the well-known identity fields.
+    const hints = {
+      phone: { inputMode: "numeric", maxLength: 10, placeholder: "10-digit mobile" },
+      mobile: { inputMode: "numeric", maxLength: 10, placeholder: "10-digit mobile" },
+      aadhar: { inputMode: "numeric", maxLength: 12, placeholder: "12-digit Aadhaar" },
+      pan: { maxLength: 10, placeholder: "ABCDE1234F", style: { textTransform: "uppercase" } },
+    }[field.field_name] || {};
+
     // Generic input (text / email / tel / number)
     return (
       <label key={field.field_name} className="block">
@@ -194,6 +209,7 @@ export default function RegisterPage() {
           onChange={handleChange}
           value={formData[field.field_name] || ""}
           className={baseInput}
+          {...hints}
         />
       </label>
     );

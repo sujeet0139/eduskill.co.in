@@ -3,6 +3,29 @@ const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
 const { requireAdmin } = require('../middleware/authMiddleware'); // Already present
+const bcrypt = require('bcryptjs');
+
+// ADMIN: SET / GENERATE a teacher's login password (for the teacher portal).
+// Returns the plaintext ONLY when generated, so the admin can share it.
+router.put('/:id/set-password', requireAdmin, async (req, res) => {
+  let { password } = req.body;
+  const generated = !password;
+  if (password && password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+  if (!password) password = Math.random().toString(36).slice(-8);
+  try {
+    const connection = await pool.getConnection();
+    const [[teacher]] = await connection.query('SELECT id, email FROM teachers WHERE id = ?', [req.params.id]);
+    if (!teacher) { connection.release(); return res.status(404).json({ error: 'Teacher not found.' }); }
+    const hash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    await connection.query('UPDATE teachers SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
+    connection.release();
+    res.json({ success: true, message: 'Password updated.', email: teacher.email, password: generated ? password : undefined });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Profile photo upload middleware (up to 2MB)
 const upload = makeUpload({

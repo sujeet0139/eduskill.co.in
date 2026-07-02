@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { student_id: "", grant_type: "program", program_id: "", course_id: "", issued_date: "" };
 
@@ -19,6 +21,7 @@ export default function AdminCertificates() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/certificates", token()).then((d) => setCerts(d.certificates || [])).catch((e) => setError(e.message));
@@ -33,26 +36,26 @@ export default function AdminCertificates() {
 
   const generate = async (e) => {
     e.preventDefault();
-    if (!form.student_id) { alert("Select a student."); return; }
+    if (!form.student_id) { notify.toast("Select a student."); return; }
     const payload = {
       student_id: form.student_id,
       issued_date: form.issued_date || undefined,
       program_id: form.grant_type === "program" ? form.program_id || null : null,
       course_id: form.grant_type === "course" ? form.course_id || null : null,
     };
-    if (form.grant_type === "program" && !payload.program_id) { alert("Select a program."); return; }
-    if (form.grant_type === "course" && !payload.course_id) { alert("Select a course."); return; }
+    if (form.grant_type === "program" && !payload.program_id) { notify.toast("Select a program."); return; }
+    if (form.grant_type === "course" && !payload.course_id) { notify.toast("Select a course."); return; }
     setSaving(true);
     try {
       await api.post("/api/certificates/generate", payload, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
   };
 
   const revoke = async (id) => {
-    if (!confirm("Revoke this certificate? It will show as invalid on verification.")) return;
-    try { await api.del(`/api/certificates/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Revoke this certificate? It will show as invalid on verification."))) return;
+    try { await api.del(`/api/certificates/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   const filtered = certs.filter((c) =>
@@ -62,7 +65,12 @@ export default function AdminCertificates() {
 
   return (
     <>
-      <PageHeader title="Certificates" subtitle={`${certs.length} issued`} action={<Button onClick={openNew}>+ Issue Certificate</Button>} />
+      <PageHeader title="Certificates" subtitle={`${certs.length} issued`} action={
+        <div className="flex gap-2">
+          <Link href="/admin/certificates/templates"><Button className="bg-gray-600 hover:bg-gray-700">Templates</Button></Link>
+          <Button onClick={openNew}>+ Issue Certificate</Button>
+        </div>
+      } />
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
       <div className="mb-3">

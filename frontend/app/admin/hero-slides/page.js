@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { title: "", subtitle: "", alt_text: "", cta_text: "", cta_link: "", order_no: 0, is_active: true };
 
@@ -17,6 +18,7 @@ export default function AdminHeroSlides() {
   const [file, setFile] = useState(null);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => api.get("/api/hero-slides", token()).then((d) => setSlides(d.slides || [])).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -27,7 +29,7 @@ export default function AdminHeroSlides() {
 
   const save = async (e) => {
     e.preventDefault();
-    if (!editId && !file) { alert("Please choose an image for the new slide."); return; }
+    if (!editId && !file) { notify.toast("Please choose an image for the new slide."); return; }
     setSaving(true);
     try {
       const fd = new FormData();
@@ -42,13 +44,13 @@ export default function AdminHeroSlides() {
       if (editId) await api.putForm(`/api/hero-slides/${editId}`, fd, token());
       else await api.postForm("/api/hero-slides", fd, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
   };
 
   const remove = async (id) => {
-    if (!confirm("Delete this slide?")) return;
-    try { await api.del(`/api/hero-slides/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this slide?"))) return;
+    try { await api.del(`/api/hero-slides/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

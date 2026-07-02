@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const { sendWelcomeEmail } = require('../email');
 const bcrypt = require('bcryptjs');
 const { requireAdmin } = require('../middleware/authMiddleware');
+const { validateStudentFields, normalizeMobile, isValidPan } = require('../lib/validators');
 
 // STUDENT REGISTRATION ENDPOINT
 router.post('/register', async (req, res) => {
@@ -30,6 +31,18 @@ router.post('/register', async (req, res) => {
         return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
       }
     }
+
+    // Format validation for mobile / aadhar / pan (email handled above).
+    const fmtErr = validateStudentFields(studentData);
+    if (fmtErr) {
+      connection.release();
+      return res.status(400).json({ error: fmtErr });
+    }
+    // Normalize stored values so lookups & display are consistent.
+    if (studentData.phone) studentData.phone = normalizeMobile(studentData.phone);
+    if (studentData.pan) studentData.pan = String(studentData.pan).trim().toUpperCase();
+    if (studentData.aadhar) studentData.aadhar = String(studentData.aadhar).replace(/\s/g, '');
+
     const [existingEmail] = await connection.query(
       'SELECT id FROM students WHERE email = ?',
       [studentData.email]
@@ -343,10 +356,13 @@ router.put('/documents/:docId/status', requireAdmin, async (req, res) => {
 router.put('/:id', requireAdmin, async (req, res) => {
   const { name, email, phone, collegeId, department, status, roll_number, current_year, wallet_balance } = req.body;
   try {
+    const fmtErr = validateStudentFields({ email, phone });
+    if (fmtErr) return res.status(400).json({ error: fmtErr });
+    const normPhone = phone ? normalizeMobile(phone) : phone;
     const connection = await pool.getConnection();
     await connection.query(
       'UPDATE students SET name=?, email=?, phone=?, college_id=?, department=?, status=?, roll_number=?, current_year=?, wallet_balance=? WHERE id=?',
-      [name, email, phone, collegeId, department, status, roll_number, current_year, wallet_balance, req.params.id]
+      [name, email, normPhone, collegeId, department, status, roll_number, current_year, wallet_balance, req.params.id]
     );
     connection.release();
     res.json({ success: true, message: 'Student updated successfully' });
@@ -409,6 +425,9 @@ router.post('/bulk-import', requireAdmin, async (req, res) => {
     for (const st of students) {
       const ref = 'SKC' + Date.now() + Math.floor(Math.random() * 1000);
       try {
+        const fmtErr = validateStudentFields(st);
+        if (fmtErr) { errors.push({ email: st.email, error: fmtErr }); continue; }
+        if (st.phone) st.phone = normalizeMobile(st.phone);
         await connection.query(
           `INSERT INTO students (reference_no, name, email, phone, roll_number, current_year, college_id, department) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -421,6 +440,198 @@ router.post('/bulk-import', requireAdmin, async (req, res) => {
     }
     connection.release();
     res.json({ success: true, message: `Successfully imported ${imported} students`, errors: errors.length > 0 ? errors : undefined });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: ADD A SINGLE STUDENT (manual enrollment)
+// Generates enrollment id + reference no. Password optional — if omitted we
+// generate a random temporary one and return it so the admin can share it.
+router.post('/', requireAdmin, async (req, res) => {
+  const { name, email, phone, collegeId, department, roll_number, current_year, aadhar, pan } = req.body;
+  if (!name || !email) return res.status(400).json({ error: 'Name and email are required.' });
+
+  const fmtErr = validateStudentFields({ email, phone, aadhar, pan });
+  if (fmtErr) return res.status(400).json({ error: fmtErr });
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [existing] = await connection.query('SELECT id FROM students WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      connection.release();
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+
+    const currentYear = new Date().getFullYear().toString().slice(-2);
+    const [[lastStudent]] = await connection.query('SELECT id FROM students ORDER BY id DESC LIMIT 1');
+    const nextId = (lastStudent ? lastStudent.id : 0) + 1;
+    const enrollmentId = `ENR${currentYear}${String(nextId).padStart(4, '0')}`;
+    const referenceNo = 'SKC' + Date.now();
+
+    // Generate a temporary password the admin can hand to the student.
+    const tempPassword = req.body.password || Math.random().toString(36).slice(-8);
+    const passwordHash = await bcrypt.hash(tempPassword, await bcrypt.genSalt(10));
+
+    const [result] = await connection.query(
+      `INSERT INTO students (enrollment_id, reference_no, name, email, password_hash, phone, aadhar, pan, roll_number, current_year, college_id, department, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registered')`,
+      [enrollmentId, referenceNo, name, email, passwordHash, phone ? normalizeMobile(phone) : null,
+       aadhar || null, pan ? String(pan).toUpperCase() : null, roll_number || null, current_year || 1,
+       collegeId || null, department || null]
+    );
+    connection.release();
+
+    try { await sendWelcomeEmail(email, name, referenceNo); } catch (e) { /* non-fatal */ }
+
+    res.status(201).json({
+      success: true,
+      message: 'Student added successfully',
+      studentId: result.insertId,
+      enrollmentId,
+      referenceNo,
+      // Only returned when we generated the password, so the admin can share it.
+      tempPassword: req.body.password ? undefined : tempPassword,
+    });
+  } catch (error) {
+    if (connection) connection.release();
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: LIST A STUDENT'S ENROLLMENTS (courses + programs, with batch & status)
+router.get('/:id/enrollments', requireAdmin, async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [courses] = await connection.query(
+      `SELECT sc.course_id AS item_id, c.title, sc.batch_id, b.name AS batch_name, sc.status, sc.enrolled_at
+       FROM student_courses sc JOIN courses c ON c.id = sc.course_id
+       LEFT JOIN batches b ON b.id = sc.batch_id
+       WHERE sc.student_id = ? ORDER BY sc.enrolled_at DESC`, [req.params.id]);
+    const [programs] = await connection.query(
+      `SELECT sp.program_id AS item_id, p.title, sp.batch_id, b.name AS batch_name, sp.status, sp.enrolled_at
+       FROM student_programs sp JOIN programs p ON p.id = sp.program_id
+       LEFT JOIN batches b ON b.id = sp.batch_id
+       WHERE sp.student_id = ? ORDER BY sp.enrolled_at DESC`, [req.params.id]);
+    connection.release();
+    res.json({ success: true, courses, programs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: ENROL / UPDATE a student in a course or program (optionally in a batch).
+// Idempotent: re-enrolling updates the batch/status. Keeps batch seat counts in sync.
+router.post('/:id/enroll', requireAdmin, async (req, res) => {
+  const { type, item_id, batch_id, status } = req.body;
+  if (!['course', 'program'].includes(type) || !item_id) {
+    return res.status(400).json({ error: 'type (course|program) and item_id are required.' });
+  }
+  const table = type === 'course' ? 'student_courses' : 'student_programs';
+  const fk = type === 'course' ? 'course_id' : 'program_id';
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    // Was the student already enrolled (and in which batch)?
+    const [[existing]] = await connection.query(
+      `SELECT id, batch_id FROM ${table} WHERE student_id = ? AND ${fk} = ?`, [req.params.id, item_id]);
+
+    await connection.query(
+      `INSERT INTO ${table} (student_id, ${fk}, batch_id, status) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE batch_id = VALUES(batch_id), status = VALUES(status)`,
+      [req.params.id, item_id, batch_id || null, status || 'enrolled']);
+
+    // Keep batch seat counts correct when the batch assignment changes.
+    const oldBatch = existing ? existing.batch_id : null;
+    const newBatch = batch_id || null;
+    if (String(oldBatch) !== String(newBatch)) {
+      if (oldBatch) await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [oldBatch]);
+      if (newBatch) await connection.query('UPDATE batches SET current_enrolled = current_enrolled + 1 WHERE id = ?', [newBatch]);
+    }
+    connection.release();
+    res.json({ success: true, message: existing ? 'Enrollment updated.' : 'Student enrolled.' });
+  } catch (error) {
+    if (connection) connection.release();
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: UNENROL a student from a course or program.
+router.delete('/:id/enroll', requireAdmin, async (req, res) => {
+  const { type, item_id } = req.query;
+  if (!['course', 'program'].includes(type) || !item_id) {
+    return res.status(400).json({ error: 'type (course|program) and item_id are required.' });
+  }
+  const table = type === 'course' ? 'student_courses' : 'student_programs';
+  const fk = type === 'course' ? 'course_id' : 'program_id';
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [[existing]] = await connection.query(
+      `SELECT batch_id FROM ${table} WHERE student_id = ? AND ${fk} = ?`, [req.params.id, item_id]);
+    await connection.query(`DELETE FROM ${table} WHERE student_id = ? AND ${fk} = ?`, [req.params.id, item_id]);
+    if (existing && existing.batch_id) {
+      await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [existing.batch_id]);
+    }
+    connection.release();
+    res.json({ success: true, message: 'Student unenrolled.' });
+  } catch (error) {
+    if (connection) connection.release();
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: SET / GENERATE A STUDENT'S PASSWORD
+// If `password` is provided it is used; otherwise a random one is generated and
+// returned so the admin can share it (e.g. via WhatsApp/email).
+router.put('/:id/set-password', requireAdmin, async (req, res) => {
+  let { password } = req.body;
+  const generated = !password;
+  if (password && password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+  if (!password) password = Math.random().toString(36).slice(-8);
+
+  try {
+    const connection = await pool.getConnection();
+    const [[student]] = await connection.query('SELECT id, email, name FROM students WHERE id = ?', [req.params.id]);
+    if (!student) { connection.release(); return res.status(404).json({ error: 'Student not found.' }); }
+    const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    await connection.query('UPDATE students SET password_hash = ? WHERE id = ?', [passwordHash, req.params.id]);
+    connection.release();
+    res.json({
+      success: true,
+      message: 'Password updated successfully.',
+      email: student.email,
+      // Return the plaintext ONLY when we generated it, so the admin can share it.
+      password: generated ? password : undefined,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADMIN: UPLOAD / REPLACE A STUDENT'S PHOTO (or signature) directly.
+// Reuses the shared document store; marks it verified since an admin uploaded it.
+router.post('/:id/photo', requireAdmin, docUpload.single('document'), async (req, res) => {
+  const file = req.file;
+  const document_type = req.body.document_type || 'photo';
+  if (!file) return res.status(400).json({ error: 'A file is required.' });
+  if (!['photo', 'signature'].includes(document_type)) {
+    return res.status(400).json({ error: 'document_type must be "photo" or "signature".' });
+  }
+  try {
+    const connection = await pool.getConnection();
+    const url = require('../config/storage').fileUrl(file);
+    await connection.query(
+      `INSERT INTO student_documents (student_id, document_type, file_url, file_name, status)
+       VALUES (?, ?, ?, ?, 'verified')
+       ON DUPLICATE KEY UPDATE file_url = VALUES(file_url), file_name = VALUES(file_name), status = 'verified'`,
+      [req.params.id, document_type, url, file.originalname]
+    );
+    connection.release();
+    res.json({ success: true, message: 'Photo uploaded successfully.', url });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

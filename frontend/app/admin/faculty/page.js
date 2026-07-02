@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { name: "", email: "", phone: "", expertise: "", college_id: "", hourly_rate: "" };
 
@@ -17,6 +18,7 @@ export default function AdminFaculty() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/faculty", token()).then((d) => setFaculty(d.faculty || [])).catch((e) => setError(e.message));
@@ -37,11 +39,11 @@ export default function AdminFaculty() {
       if (editId) await api.put(`/api/faculty/${editId}`, form, token());
       else await api.post("/api/faculty", form, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this faculty member?")) return;
-    try { await api.del(`/api/faculty/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this faculty member?"))) return;
+    try { await api.del(`/api/faculty/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   const filtered = faculty.filter((f) =>

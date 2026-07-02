@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { title: "", message: "", target_type: "all", send_email: false, scheduled_at: "" };
 
@@ -15,6 +16,7 @@ export default function AdminAnnouncements() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => api.get("/api/announcements", token()).then((d) => setItems(d.announcements || [])).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -28,13 +30,13 @@ export default function AdminAnnouncements() {
     try {
       await api.post("/api/announcements", { ...form, send_email: !!form.send_email, scheduled_at: form.scheduled_at || null }, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
   };
 
   const resend = async (id) => {
-    if (!confirm("Resend this announcement now?")) return;
-    try { await api.post(`/api/announcements/${id}/resend`, {}, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Resend this announcement now?"))) return;
+    try { await api.post(`/api/announcements/${id}/resend`, {}, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

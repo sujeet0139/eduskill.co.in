@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { title: "", description: "", duration_weeks: "", fee: "", start_date: "", end_date: "", max_enrollment: "", status: "draft" };
 
@@ -15,6 +16,7 @@ export default function AdminPrograms() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => api.get("/api/programs", token()).then((d) => setPrograms(d.programs || [])).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -32,11 +34,11 @@ export default function AdminPrograms() {
       if (editId) await api.put(`/api/programs/${editId}`, form, token());
       else await api.post("/api/programs", form, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this program?")) return;
-    try { await api.del(`/api/programs/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this program?"))) return;
+    try { await api.del(`/api/programs/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

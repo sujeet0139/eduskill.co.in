@@ -162,4 +162,47 @@ router.get('/students', async (req, res) => {
   }
 });
 
+// ==========================================
+// 4. RECENT ACTIVITY FEED + "NEEDS ATTENTION" COUNTS (dashboard)
+// ==========================================
+router.get('/activity', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+
+    const [registrations] = await connection.query(`
+      SELECT id, name, created_at FROM students ORDER BY created_at DESC LIMIT 6
+    `);
+    const [recentPayments] = await connection.query(`
+      SELECT p.id, p.amount, p.status, p.created_at, s.name AS student_name
+      FROM payments p JOIN students s ON p.student_id = s.id
+      ORDER BY p.created_at DESC LIMIT 6
+    `);
+
+    // Needs-attention counters.
+    const [[pendingPay]] = await connection.query("SELECT COUNT(*) AS c FROM payments WHERE status = 'pending'");
+    let pendingDocs = 0;
+    try {
+      const [[d]] = await connection.query("SELECT COUNT(*) AS c FROM student_documents WHERE status = 'pending_verification'");
+      pendingDocs = d.c;
+    } catch (e) { /* table may be empty/absent */ }
+    let classesToday = 0;
+    try {
+      const [[c]] = await connection.query("SELECT COUNT(*) AS c FROM live_classes WHERE DATE(scheduled_at) = CURDATE()");
+      classesToday = c.c;
+    } catch (e) { /* ignore */ }
+
+    connection.release();
+    res.json({
+      success: true,
+      data: {
+        registrations,
+        recentPayments,
+        attention: { pendingPayments: pendingPay.c, pendingDocs, classesToday },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

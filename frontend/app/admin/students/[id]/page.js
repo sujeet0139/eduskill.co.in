@@ -5,9 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
-import { Button, Card, StatusBadge, Alert } from "@/components/ui";
+import { Button, Card, StatusBadge, Alert, Select } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td } from "@/components/admin";
 import { User, Banknote, BookOpen, FileText } from "lucide-react";
+import { useToast } from "@/components/Toast";
 
 const DetailItem = ({ label, value, children }) => (
   <div>
@@ -24,7 +25,16 @@ export default function StudentProfilePage() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("profile");
 
+  // Enrollment management state
+  const [enroll, setEnroll] = useState({ courses: [], programs: [] });
+  const [allCourses, setAllCourses] = useState([]);
+  const [allPrograms, setAllPrograms] = useState([]);
+  const [allBatches, setAllBatches] = useState([]);
+  const [newCourse, setNewCourse] = useState({ item_id: "", batch_id: "" });
+  const [newProgram, setNewProgram] = useState({ item_id: "", batch_id: "" });
+
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const loadProfile = () => {
     if (!studentId) return;
@@ -35,15 +45,45 @@ export default function StudentProfilePage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(loadProfile, [studentId]);
+  const loadEnrollments = () => {
+    if (!studentId) return;
+    api.get(`/api/students/${studentId}/enrollments`, token())
+      .then((res) => setEnroll({ courses: res.courses || [], programs: res.programs || [] }))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadProfile();
+    loadEnrollments();
+    api.get("/api/courses", token()).then((d) => setAllCourses(d.courses || [])).catch(() => {});
+    api.get("/api/programs", token()).then((d) => setAllPrograms(d.programs || [])).catch(() => {});
+    api.get("/api/batches", token()).then((d) => setAllBatches(d.batches || [])).catch(() => {});
+  }, [studentId]);
+
+  const doEnroll = async (type, item_id, batch_id, status) => {
+    if (!item_id) { notify.toast("Select an item first."); return; }
+    try {
+      await api.post(`/api/students/${studentId}/enroll`, { type, item_id, batch_id: batch_id || null, status }, token());
+      loadEnrollments();
+      if (type === "course") setNewCourse({ item_id: "", batch_id: "" });
+      else setNewProgram({ item_id: "", batch_id: "" });
+    } catch (e) { notify.error(e.message); }
+  };
+  const unenroll = async (type, item_id) => {
+    if (!(await notify.confirm("Remove this enrollment?"))) return;
+    try {
+      await api.del(`/api/students/${studentId}/enroll?type=${type}&item_id=${item_id}`, token());
+      loadEnrollments();
+    } catch (e) { notify.error(e.message); }
+  };
 
   const verifyStudent = async () => {
-    if (!confirm("Mark this student as verified?")) return;
+    if (!(await notify.confirm("Mark this student as verified?"))) return;
     try {
       await api.put(`/api/students/${studentId}/verify`, {}, token());
       loadProfile();
     } catch (err) {
-      alert("Verification failed: " + err.message);
+      notify.error("Verification failed: " + err.message);
     }
   };
 
@@ -56,7 +96,7 @@ export default function StudentProfilePage() {
   const TABS = [
     { id: "profile", label: "Profile", icon: User },
     { id: "payments", label: "Payments", icon: Banknote },
-    { id: "courses", label: "Courses", icon: BookOpen },
+    { id: "courses", label: "Enrollments", icon: BookOpen },
     { id: "documents", label: "Documents", icon: FileText },
   ];
 
@@ -135,23 +175,32 @@ export default function StudentProfilePage() {
         )}
 
         {activeTab === "courses" && (
-          <Card>
-            <h3 className="mb-4 text-lg font-semibold">Learning & Internships</h3>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              <div>
-                <h4 className="mb-2 font-semibold text-gray-700">Enrolled Courses</h4>
-                {learning.courses.length > 0 ? learning.courses.map((c) => (
-                  <div key={c.id} className="mb-2 border-b pb-2"><p className="font-medium">{c.title}</p><p className="text-xs text-gray-500">Status: {c.status}</p></div>
-                )) : <p className="text-sm text-gray-500">No courses enrolled.</p>}
-              </div>
-              <div>
-                <h4 className="mb-2 font-semibold text-gray-700">Internship Programs</h4>
-                {internships.length > 0 ? internships.map((p) => (
-                  <div key={p.id} className="mb-2 border-b pb-2"><p className="font-medium">{p.program_title}</p><p className="text-xs text-gray-500">Status: {p.status}</p></div>
-                )) : <p className="text-sm text-gray-500">No internships enrolled.</p>}
-              </div>
-            </div>
-          </Card>
+          <div className="space-y-6">
+            <EnrollmentManager
+              title="Courses"
+              type="course"
+              rows={enroll.courses}
+              options={allCourses}
+              batches={allBatches.filter((b) => b.course_id)}
+              batchKey="course_id"
+              newState={newCourse}
+              setNewState={setNewCourse}
+              onEnroll={doEnroll}
+              onUnenroll={unenroll}
+            />
+            <EnrollmentManager
+              title="Programs / Internships"
+              type="program"
+              rows={enroll.programs}
+              options={allPrograms}
+              batches={allBatches.filter((b) => b.program_id)}
+              batchKey="program_id"
+              newState={newProgram}
+              setNewState={setNewProgram}
+              onEnroll={doEnroll}
+              onUnenroll={unenroll}
+            />
+          </div>
         )}
 
         {activeTab === "documents" && (
@@ -174,5 +223,71 @@ export default function StudentProfilePage() {
         )}
       </div>
     </>
+  );
+}
+
+// Editable enrollment list for either courses or programs. Lets an admin add,
+// change batch/status, and remove enrollments directly (no payment needed).
+function EnrollmentManager({ title, type, rows, options, batches, batchKey, newState, setNewState, onEnroll, onUnenroll }) {
+  // Which items are not yet enrolled (so we don't offer duplicates).
+  const enrolledIds = new Set(rows.map((r) => String(r.item_id)));
+  const available = options.filter((o) => !enrolledIds.has(String(o.id)));
+  const batchesFor = (itemId) => batches.filter((b) => String(b[batchKey]) === String(itemId));
+
+  return (
+    <Card>
+      <h3 className="mb-4 text-lg font-semibold">{title}</h3>
+
+      {rows.length === 0 ? (
+        <p className="mb-4 text-sm text-gray-500">Not enrolled in any {title.toLowerCase()} yet.</p>
+      ) : (
+        <div className="mb-4 space-y-2">
+          {rows.map((r) => (
+            <div key={r.item_id} className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-100 p-3">
+              <div className="min-w-[160px] flex-1">
+                <p className="font-medium">{r.title}</p>
+                <p className="text-xs text-gray-500">Enrolled {r.enrolled_at ? new Date(r.enrolled_at).toLocaleDateString() : ""}</p>
+              </div>
+              <select
+                value={r.batch_id || ""}
+                onChange={(e) => onEnroll(type, r.item_id, e.target.value, r.status)}
+                className="rounded-lg border-2 border-gray-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+              >
+                <option value="">— No batch —</option>
+                {batchesFor(r.item_id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <select
+                value={r.status || "enrolled"}
+                onChange={(e) => onEnroll(type, r.item_id, r.batch_id, e.target.value)}
+                className="rounded-lg border-2 border-gray-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+              >
+                <option value="enrolled">Enrolled</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                {type === "program" && <option value="dropped">Dropped</option>}
+              </select>
+              <button onClick={() => onUnenroll(type, r.item_id)} className="rounded bg-red-100 px-2 py-1 text-xs text-red-700 hover:bg-red-200">Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add new enrollment */}
+      <div className="flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4">
+        <div className="min-w-[200px] flex-1">
+          <Select label={`Add ${title.replace(/s$/, "")}`} value={newState.item_id} onChange={(e) => setNewState({ item_id: e.target.value, batch_id: "" })}>
+            <option value="">— Select —</option>
+            {available.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
+          </Select>
+        </div>
+        <div className="min-w-[160px]">
+          <Select label="Batch (optional)" value={newState.batch_id} onChange={(e) => setNewState({ ...newState, batch_id: e.target.value })}>
+            <option value="">— No batch —</option>
+            {batchesFor(newState.item_id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </Select>
+        </div>
+        <Button onClick={() => onEnroll(type, newState.item_id, newState.batch_id, "enrolled")}>Enroll</Button>
+      </div>
+    </Card>
   );
 }

@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
 const { sendPaymentConfirmationEmail } = require('../email');
+const { requireAdmin } = require('../middleware/authMiddleware');
 
 // Screenshot uploads (image/PDF, 5 MB).
 const upload = makeUpload({
@@ -128,12 +129,15 @@ router.post('/initiate', async (req, res) => {
       );
     } else if (payment_plan === 'emi') {
       const remaining = amountDue - upfrontAmount;
-      const emiAmount = Math.ceil(remaining / 2);
+      // Split the remainder into two installments; give the LAST one the leftover
+      // so the total exactly equals `remaining` (no ±₹1 over/undercharge).
+      const emi2 = Math.ceil(remaining / 2);
+      const emi3 = remaining - emi2;
       await connection.query(
-        `INSERT INTO emi_installments (parent_payment_id, student_id, installment_no, amount_due, due_date) VALUES 
+        `INSERT INTO emi_installments (parent_payment_id, student_id, installment_no, amount_due, due_date) VALUES
         (?, ?, 2, ?, DATE_ADD(NOW(), INTERVAL 30 DAY)),
         (?, ?, 3, ?, DATE_ADD(NOW(), INTERVAL 60 DAY))`,
-        [parentPaymentId, student_id, emiAmount, parentPaymentId, student_id, emiAmount]
+        [parentPaymentId, student_id, emi2, parentPaymentId, student_id, emi3]
       );
     }
 
@@ -176,11 +180,11 @@ router.post('/:id/upload-proof', upload.single('screenshot'), async (req, res) =
 });
 
 // 3. ADMIN: GET PAYMENTS (with filters)
-router.get('/', async (req, res) => {
+router.get('/', requireAdmin, async (req, res) => {
   const { status, student_id } = req.query;
   try {
     const connection = await pool.getConnection();
-    let query = `SELECT p.*, s.name as student_name, s.email as student_email, s.reference_no as student_ref 
+    let query = `SELECT p.*, s.name as student_name, s.email as student_email, s.phone, s.reference_no as student_ref
                  FROM payments p JOIN students s ON p.student_id = s.id WHERE 1=1`;
     const params = [];
     if (status) { query += ' AND p.status = ?'; params.push(status); }
@@ -196,7 +200,7 @@ router.get('/', async (req, res) => {
 });
 
 // 4. ADMIN: APPROVE A PENDING PAYMENT
-router.post('/:id/approve', async (req, res) => {
+router.post('/:id/approve', requireAdmin, async (req, res) => {
   const { transaction_id, notes } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -239,7 +243,7 @@ router.post('/:id/approve', async (req, res) => {
 });
 
 // 5. ADMIN: REJECT/REFUND A PAYMENT
-router.post('/:id/reject', async (req, res) => {
+router.post('/:id/reject', requireAdmin, async (req, res) => {
   const { notes } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -252,11 +256,11 @@ router.post('/:id/reject', async (req, res) => {
 });
 
 // 6. ADMIN: GET ALL PAYMENTS (alias of list, used by the admin payments page)
-router.get('/all', async (req, res) => {
+router.get('/all', requireAdmin, async (req, res) => {
   try {
     const connection = await pool.getConnection();
     const [payments] = await connection.query(
-      `SELECT p.*, s.name, s.email, s.reference_no
+      `SELECT p.*, s.name, s.email, s.phone, s.reference_no
        FROM payments p JOIN students s ON p.student_id = s.id
        ORDER BY p.created_at DESC`
     );
@@ -268,7 +272,7 @@ router.get('/all', async (req, res) => {
 });
 
 // 7. ADMIN: ADD A MANUAL (offline) PAYMENT — recorded as completed
-router.post('/manual', async (req, res) => {
+router.post('/manual', requireAdmin, async (req, res) => {
   const { studentId, amount, referenceNo, paymentDate, item_type, item_id } = req.body;
   if (!studentId || !amount) {
     return res.status(400).json({ error: 'Student ID and amount are required.' });
@@ -287,6 +291,54 @@ router.post('/manual', async (req, res) => {
   }
 });
 
-// Additional endpoints for refund requests, EMI management, etc. would go here.
+// 8. ADMIN: FINANCE SUMMARY — powers the finance command-center dashboard.
+router.get('/finance-summary', requireAdmin, async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+
+    // Headline totals.
+    const [[totals]] = await connection.query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS total_collected,
+        COALESCE(SUM(CASE WHEN status = 'pending'   THEN amount ELSE 0 END), 0) AS pending_amount,
+        COALESCE(SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END), 0)      AS pending_count,
+        COALESCE(SUM(CASE WHEN status = 'completed' AND payment_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') THEN amount ELSE 0 END), 0) AS this_month,
+        COALESCE(SUM(CASE WHEN status = 'completed' AND payment_date >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01') AND payment_date < DATE_FORMAT(CURDATE(), '%Y-%m-01') THEN amount ELSE 0 END), 0) AS last_month
+      FROM payments
+    `);
+
+    // Outstanding EMI/split installments still owed.
+    const [[outstanding]] = await connection.query(`
+      SELECT COALESCE(SUM(amount_due), 0) AS outstanding, COUNT(*) AS due_count
+      FROM emi_installments WHERE status <> 'paid'
+    `);
+
+    // 12-month revenue trend (oldest first for charts).
+    const [monthly] = await connection.query(`
+      SELECT DATE_FORMAT(payment_date, '%Y-%m') AS month, SUM(amount) AS revenue
+      FROM payments
+      WHERE status = 'completed' AND payment_date IS NOT NULL
+        AND payment_date >= DATE_FORMAT(CURDATE() - INTERVAL 11 MONTH, '%Y-%m-01')
+      GROUP BY month ORDER BY month ASC
+    `);
+
+    // Status breakdown (for the donut).
+    const [byStatus] = await connection.query(`
+      SELECT status, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount
+      FROM payments GROUP BY status
+    `);
+
+    // Revenue by category.
+    const [byCategory] = await connection.query(`
+      SELECT payment_for_type AS type, COALESCE(SUM(amount), 0) AS amount
+      FROM payments WHERE status = 'completed' GROUP BY payment_for_type
+    `);
+
+    connection.release();
+    res.json({ success: true, data: { totals, outstanding, monthly, byStatus, byCategory } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

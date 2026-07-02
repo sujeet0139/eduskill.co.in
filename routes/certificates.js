@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { resolveTemplateId } = require('./certificate-templates');
 
 // GET ALL CERTIFICATES
 router.get('/', async (req, res) => {
@@ -68,11 +69,12 @@ router.post('/check-and-generate', async (req, res) => {
 
     // 3. Generate Certificate
     const certificate_no = 'CERT-' + Date.now();
+    const template_id = await resolveTemplateId(connection, { course_id, program_id });
     await connection.query(
-      `INSERT INTO certificates (student_id, course_id, program_id, certificate_no, issued_date, final_score_percent) 
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE certificate_no = VALUES(certificate_no), issued_date = VALUES(issued_date), final_score_percent = VALUES(final_score_percent)`,
-      [student_id, course_id || null, program_id || null, certificate_no, new Date(), final_score]
+      `INSERT INTO certificates (student_id, course_id, program_id, certificate_no, issued_date, final_score_percent, template_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE certificate_no = VALUES(certificate_no), issued_date = VALUES(issued_date), final_score_percent = VALUES(final_score_percent), template_id = VALUES(template_id)`,
+      [student_id, course_id || null, program_id || null, certificate_no, new Date(), final_score, template_id]
     );
 
     connection.release();
@@ -89,10 +91,11 @@ router.post('/generate', async (req, res) => {
   try {
     const certificate_no = 'CERT-' + Date.now();
     const connection = await pool.getConnection();
+    const template_id = await resolveTemplateId(connection, { course_id, program_id });
     await connection.query(
-      `INSERT INTO certificates (student_id, course_id, program_id, certificate_no, issued_date) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [student_id, course_id || null, program_id || null, certificate_no, issued_date || new Date()]
+      `INSERT INTO certificates (student_id, course_id, program_id, certificate_no, issued_date, template_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [student_id, course_id || null, program_id || null, certificate_no, issued_date || new Date(), template_id]
     );
     connection.release();
     res.json({ success: true, message: 'Certificate generated successfully' });

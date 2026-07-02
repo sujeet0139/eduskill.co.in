@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { title: "", category: "", subject: "", description: "", content_pdf: "", duration_weeks: "", price: "", min_payment: "", language: "English", level: "Beginner", status: "draft" };
 
@@ -15,6 +16,7 @@ export default function AdminCourses() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => api.get("/api/courses", token()).then((d) => setCourses(d.courses || [])).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -33,7 +35,7 @@ export default function AdminCourses() {
       fd.append("pdf", fileObj);
       const res = await api.postForm("/api/courses/upload-content", fd, token());
       setForm((f) => ({ ...f, content_pdf: res.url }));
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setPdfUploading(false); }
   };
 
@@ -44,11 +46,11 @@ export default function AdminCourses() {
       else await api.post("/api/courses", form, token());
       setModal(false);
       load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this course?")) return;
-    try { await api.del(`/api/courses/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this course?"))) return;
+    try { await api.del(`/api/courses/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

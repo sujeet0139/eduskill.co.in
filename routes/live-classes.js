@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
-const { sendClassMaterialsEmail } = require('../email');
+const { sendClassMaterialsEmail, sendClassReminderEmail } = require('../email');
 const { makeUpload, fileUrl } = require('../config/storage');
 
 // Configure upload for class materials and recordings (up to 50MB)
@@ -226,6 +226,45 @@ router.post('/:id/notify-materials', async (req, res) => {
     }
 
     res.json({ success: true, message: `Notifications sent to ${students.length} students.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// 8b. EMAIL THE MEETING LINK TO REGISTERED STUDENTS
+// ==========================================
+router.post('/:id/notify-link', async (req, res) => {
+  const classId = req.params.id;
+  try {
+    const connection = await pool.getConnection();
+    const [[classDetails]] = await connection.query('SELECT * FROM live_classes WHERE id = ?', [classId]);
+    if (!classDetails) {
+      connection.release();
+      return res.status(404).json({ error: 'Class not found' });
+    }
+    if (!classDetails.meet_link) {
+      connection.release();
+      return res.status(400).json({ error: 'This class has no meeting link yet.' });
+    }
+
+    let studentQuery = `SELECT id, name, email FROM students WHERE status = 'verified'`;
+    const studentParams = [];
+    if (classDetails.college_id) {
+      studentQuery += ' AND college_id = ?';
+      studentParams.push(classDetails.college_id);
+    }
+    if (classDetails.course_id) {
+      studentQuery += ' AND id IN (SELECT student_id FROM student_courses WHERE course_id = ?)';
+      studentParams.push(classDetails.course_id);
+    }
+    const [students] = await connection.query(studentQuery, studentParams);
+    connection.release();
+
+    for (const student of students) {
+      await sendClassReminderEmail(student.email, student.name, classDetails);
+    }
+    res.json({ success: true, message: `Meeting link emailed to ${students.length} students.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

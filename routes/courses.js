@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { requireAdmin } = require('../middleware/authMiddleware');
 
 const pdfUpload = makeUpload({
   folder: 'eduskill/course-content',
@@ -12,7 +13,7 @@ const pdfUpload = makeUpload({
 });
 
 // UPLOAD COURSE CONTENT PDF -> returns the public URL (admin pastes/saves it on the course)
-router.post('/upload-content', pdfUpload.single('pdf'), async (req, res) => {
+router.post('/upload-content', requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
   const url = fileUrl(req.file);
   if (!url) return res.status(400).json({ error: 'PDF file is required.' });
   res.json({ success: true, url });
@@ -31,7 +32,7 @@ router.get('/', async (req, res) => {
 });
 
 // CREATE NEW COURSE
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -48,7 +49,7 @@ router.post('/', async (req, res) => {
 });
 
 // UPDATE COURSE
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -64,7 +65,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE COURSE
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const connection = await pool.getConnection();
     await connection.query('DELETE FROM courses WHERE id=?', [req.params.id]);

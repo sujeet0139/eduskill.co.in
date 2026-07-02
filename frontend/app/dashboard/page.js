@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { studentAuth } from "@/lib/auth";
+import InstituteConnect from "@/components/InstituteConnect";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fileHref = (p) => (!p ? null : /^https?:\/\//.test(p) ? p : `${api.base}${p}`);
@@ -16,6 +17,9 @@ export default function StudentDashboard() {
   const [programs, setPrograms] = useState([]);
   const [payments, setPayments] = useState([]);
   const [certs, setCerts] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [liveClasses, setLiveClasses] = useState([]);
   const [payInfo, setPayInfo] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -41,8 +45,14 @@ export default function StudentDashboard() {
     api.get("/api/courses").then((d) => setCourses((d.courses || []).filter((c) => c.status === "active"))).catch(() => {});
     api.get("/api/programs").then((d) => setPrograms((d.programs || []).filter((p) => p.status === "active"))).catch(() => {});
     api.get("/api/student-dashboard/certificates", token()).then((d) => setCerts(d.certificates || [])).catch(() => {});
+    api.get("/api/student-dashboard/assignments", token()).then((d) => setAssignments(d.assignments || [])).catch(() => {});
+    api.get("/api/student-dashboard/materials", token()).then((d) => setMaterials(d.materials || [])).catch(() => {});
+    api.get("/api/student-dashboard/live-classes", token()).then((d) => setLiveClasses(d.classes || [])).catch(() => {});
     api.get("/api/public/payment-info").then((d) => setPayInfo(d.payment || {})).catch(() => {});
   };
+
+  const loadAssignments = () =>
+    api.get("/api/student-dashboard/assignments", token()).then((d) => setAssignments(d.assignments || [])).catch(() => {});
 
   const loadPayments = (sid) =>
     api.get(`/api/payments?student_id=${sid}`).then((d) => setPayments(d.payments || [])).catch(() => {});
@@ -118,18 +128,37 @@ export default function StudentDashboard() {
   ];
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-10">
+    <main className="mx-auto w-full max-w-5xl px-4 py-6 pb-24 md:py-10 md:pb-10">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-blue-900 to-blue-700 p-6 text-white">
-        <div>
-          <h1 className="text-2xl font-bold">Hi, {student?.name || "Student"} 👋</h1>
-          <p className="text-sm text-blue-200">Ref: {student?.reference_no} · Status: <span className="capitalize">{student?.status}</span></p>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-blue-900 to-blue-700 p-6 text-white shadow-lg">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-xl font-bold">
+            {(student?.name || "S").charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Hi, {student?.name || "Student"} 👋</h1>
+            <p className="text-sm text-blue-200">Ref: {student?.reference_no} · Status: <span className="capitalize">{student?.status}</span></p>
+          </div>
         </div>
         <button onClick={logout} className="rounded-lg bg-white/15 px-4 py-2 text-sm font-medium hover:bg-white/25">Logout</button>
       </div>
 
+      {/* Quick stats */}
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        {[
+          { label: "Courses", value: courses.length + programs.length },
+          { label: "Assignments", value: assignments.length },
+          { label: "Certificates", value: certs.length },
+        ].map((s) => (
+          <div key={s.label} className="rounded-2xl bg-white p-4 text-center shadow-sm ring-1 ring-gray-100">
+            <div className="text-2xl font-extrabold text-blue-900">{s.value}</div>
+            <div className="text-xs text-gray-500">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
       {/* Enroll & Pay */}
-      <section className="mt-8">
+      <section id="s-home" className="mt-8 scroll-mt-4">
         <h2 className="mb-3 text-lg font-bold text-gray-900">Programs & Courses</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => {
@@ -170,7 +199,7 @@ export default function StudentDashboard() {
       </section>
 
       {/* Payments history */}
-      <section className="mt-10">
+      <section id="s-pay" className="mt-10 scroll-mt-4">
         <h2 className="mb-3 text-lg font-bold text-gray-900">My Payments</h2>
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
@@ -216,6 +245,78 @@ export default function StudentDashboard() {
           </div>
         )}
       </section>
+
+      {/* Assignments */}
+      <section id="s-tasks" className="mt-10 scroll-mt-4">
+        <h2 className="mb-3 text-lg font-bold text-gray-900">My Assignments</h2>
+        {assignments.length === 0 ? (
+          <p className="text-sm text-gray-500">No assignments shared with you yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {assignments.map((a) => (
+              <AssignmentCard key={a.id} a={a} token={token()} onSubmitted={loadAssignments} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Live Classes */}
+      <section id="s-classes" className="mt-10 scroll-mt-4">
+        <h2 className="mb-3 text-lg font-bold text-gray-900">Live Classes</h2>
+        {liveClasses.length === 0 ? (
+          <p className="text-sm text-gray-500">No live classes scheduled.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {liveClasses.map((c) => {
+              const when = c.scheduled_at ? new Date(c.scheduled_at) : null;
+              const upcoming = when && when > new Date();
+              return (
+                <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-gray-900">{c.title}</p>
+                      <p className="text-xs text-gray-500">{c.topic}{c.mentor_name ? ` · ${c.mentor_name}` : ""}</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${upcoming ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                      {upcoming ? "Upcoming" : (c.status || "past")}
+                    </span>
+                  </div>
+                  {when && <p className="mt-1 text-xs text-gray-500">{when.toLocaleString()}</p>}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {c.meet_link && upcoming && <a href={c.meet_link} target="_blank" rel="noreferrer" className="rounded-lg bg-blue-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800">Join Class</a>}
+                    {c.recording_url && <a href={c.recording_url} target="_blank" rel="noreferrer" className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Recording</a>}
+                    {c.materials_url && <a href={c.materials_url} target="_blank" rel="noreferrer" className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Materials</a>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Study Materials (gated to enrolled courses/programs + general) */}
+      <section id="s-materials" className="mt-10 scroll-mt-4">
+        <h2 className="mb-3 text-lg font-bold text-gray-900">Study Materials</h2>
+        {materials.length === 0 ? (
+          <p className="text-sm text-gray-500">No materials available yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {materials.map((m) => (
+              <a key={m.id} href={api.mediaUrl(m.file_path)} target="_blank" rel="noreferrer"
+                className="rounded-xl border border-gray-200 bg-white p-4 transition hover:shadow-md">
+                <p className="font-semibold text-gray-900">{m.title}</p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  {m.subject ? m.subject : (m.course_title || m.program_title || m.category || "General")}
+                </p>
+                {m.description && <p className="mt-1 line-clamp-2 text-xs text-gray-400">{m.description}</p>}
+                <span className="mt-2 inline-block text-sm font-medium text-brand">Open →</span>
+              </a>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <InstituteConnect />
 
       {/* Pay modal */}
       {payItem && (
@@ -314,6 +415,22 @@ export default function StudentDashboard() {
           </div>
         </div>
       )}
+
+      {/* Mobile bottom tab bar — makes the panel feel like an app */}
+      <nav className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-around border-t border-gray-200 bg-white/95 py-1.5 backdrop-blur md:hidden">
+        {[
+          { href: "#s-home", label: "Home", icon: "🏠" },
+          { href: "#s-classes", label: "Classes", icon: "🎥" },
+          { href: "#s-tasks", label: "Tasks", icon: "📝" },
+          { href: "#s-materials", label: "Learn", icon: "📚" },
+          { href: "#s-pay", label: "Pay", icon: "💳" },
+        ].map((t) => (
+          <a key={t.href} href={t.href} className="flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1 text-[11px] font-medium text-gray-600 hover:text-blue-900">
+            <span className="text-lg leading-none">{t.icon}</span>
+            {t.label}
+          </a>
+        ))}
+      </nav>
     </main>
   );
 }
@@ -323,6 +440,92 @@ function Row({ k, v }) {
     <div className="flex justify-between border-b border-gray-100 py-1.5 last:border-0">
       <span className="text-gray-500">{k}</span>
       <span className="font-medium text-gray-800 capitalize">{v || "—"}</span>
+    </div>
+  );
+}
+
+// One assignment card with inline submit (file and/or text). Shows grade &
+// feedback once graded.
+function AssignmentCard({ a, token, onSubmitted }) {
+  const [file, setFile] = useState(null);
+  const [text, setText] = useState(a.text_answer || "");
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const submitted = !!a.submission_id;
+  const due = a.due_date ? new Date(a.due_date) : null;
+  const overdue = due && due < new Date() && a.submission_status !== "approved";
+
+  const submit = async () => {
+    if (!file && !text.trim()) { alert("Attach a file or write an answer."); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      if (file) fd.append("file", file);
+      if (text.trim()) fd.append("text_answer", text.trim());
+      await api.postForm(`/api/student-dashboard/assignments/${a.id}/submit`, fd, token);
+      setOpen(false);
+      onSubmitted && onSubmitted();
+    } catch (e) { alert(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const statusColor = {
+    approved: "bg-green-100 text-green-700",
+    revision: "bg-amber-100 text-amber-700",
+    rejected: "bg-red-100 text-red-700",
+    pending: "bg-blue-100 text-blue-700",
+  }[a.submission_status] || "bg-gray-100 text-gray-600";
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-gray-900">{a.title}</p>
+          <p className="text-xs text-gray-500">
+            {a.course_title || a.program_title || "General"}
+            {due && <> · Due {due.toLocaleDateString()}</>}
+            {a.max_marks && <> · {a.max_marks} marks</>}
+          </p>
+        </div>
+        {submitted ? (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor}`}>
+            {a.submission_status}{a.marks != null ? ` · ${a.marks}/${a.max_marks}` : ""}
+          </span>
+        ) : (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${overdue ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
+            {overdue ? "Overdue" : "Not submitted"}
+          </span>
+        )}
+      </div>
+
+      {a.description && <p className="mt-2 text-sm text-gray-600">{a.description}</p>}
+      {a.feedback && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Feedback: {a.feedback}</p>}
+
+      <div className="mt-3">
+        {!open ? (
+          <button onClick={() => setOpen(true)} className="rounded-lg bg-blue-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800">
+            {submitted ? "Re-submit" : "Submit"}
+          </button>
+        ) : (
+          <div className="space-y-2">
+            {a.submission_type !== "text" && (
+              <input type="file" onChange={(e) => setFile(e.target.files?.[0])}
+                className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-900 file:px-3 file:py-1.5 file:text-white" />
+            )}
+            {a.submission_type !== "file" && (
+              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="Type your answer…"
+                className="w-full rounded-lg border-2 border-gray-200 px-3 py-2 text-sm focus:border-blue-600 focus:outline-none" />
+            )}
+            <div className="flex gap-2">
+              <button onClick={submit} disabled={busy} className="rounded-lg bg-blue-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:bg-gray-400">
+                {busy ? "Submitting…" : "Send"}
+              </button>
+              <button onClick={() => setOpen(false)} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

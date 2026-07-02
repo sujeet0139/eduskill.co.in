@@ -5,6 +5,8 @@ const ADMIN_KEY = "adminToken";
 const ADMIN_INFO = "adminInfo";
 const STUDENT_TOKEN = "studentToken";
 const STUDENT_INFO = "studentInfo";
+const TEACHER_TOKEN = "teacherToken";
+const TEACHER_INFO = "teacherInfo";
 
 const safeGet = (k) => (typeof window !== "undefined" ? window.localStorage.getItem(k) : null);
 const safeSet = (k, v) => typeof window !== "undefined" && window.localStorage.setItem(k, v);
@@ -37,5 +39,20 @@ export const studentAuth = {
   logout: () => {
     safeDel(STUDENT_TOKEN);
     safeDel(STUDENT_INFO);
+  },
+};
+
+export const teacherAuth = {
+  token: () => safeGet(TEACHER_TOKEN),
+  teacher: () => {
+    try { return JSON.parse(safeGet(TEACHER_INFO) || "null"); } catch { return null; }
+  },
+  login: (token, teacher) => {
+    safeSet(TEACHER_TOKEN, token);
+    safeSet(TEACHER_INFO, JSON.stringify(teacher || {}));
+  },
+  logout: () => {
+    safeDel(TEACHER_TOKEN);
+    safeDel(TEACHER_INFO);
   },
 };

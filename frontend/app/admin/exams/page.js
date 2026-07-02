@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY_EXAM = {
   title: "", type: "quiz", course_id: "", program_id: "", passing_score: 50,
@@ -30,6 +31,7 @@ export default function AdminExams() {
   const [qForm, setQForm] = useState(EMPTY_Q);
 
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/exams", token()).then((d) => setExams(d.exams || [])).catch((e) => setError(e.message));
@@ -54,13 +56,13 @@ export default function AdminExams() {
       if (editId) await api.put(`/api/exams/${editId}`, payload, token());
       else await api.post("/api/exams", payload, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
     finally { setSaving(false); }
   };
 
   const remove = async (id) => {
-    if (!confirm("Delete this exam and all its questions?")) return;
-    try { await api.del(`/api/exams/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this exam and all its questions?"))) return;
+    try { await api.del(`/api/exams/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   // ---- Question manager ----
@@ -69,7 +71,7 @@ export default function AdminExams() {
     try {
       const d = await api.get(`/api/exams/${exam.id}`, token());
       setQuestions(d.exam?.questions || []);
-    } catch (e) { alert(e.message); }
+    } catch (e) { notify.error(e.message); }
   };
   const reloadQuestions = async () => {
     const d = await api.get(`/api/exams/${activeExam.id}`, token());
@@ -86,11 +88,11 @@ export default function AdminExams() {
         correct_answer: qForm.correct_answer, marks: Number(qForm.marks) || 1, negative_marks: Number(qForm.negative_marks) || 0,
       }, token());
       setQForm(EMPTY_Q); reloadQuestions(); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const deleteQuestion = async (qid) => {
-    if (!confirm("Delete this question?")) return;
-    try { await api.del(`/api/exams/${activeExam.id}/questions/${qid}`, token()); reloadQuestions(); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this question?"))) return;
+    try { await api.del(`/api/exams/${activeExam.id}/questions/${qid}`, token()); reloadQuestions(); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

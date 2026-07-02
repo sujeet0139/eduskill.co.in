@@ -49,15 +49,18 @@ app.use('/api', apiLimiter);
 // Create uploads folder for local-disk storage. On serverless hosts the app
 // filesystem is read-only/ephemeral (uploads go to Cloudinary instead), so this
 // is best-effort and must never crash startup.
-const uploadDir = path.join(__dirname, 'uploads');
+// Use the SAME directory the upload writer uses (config/storage.js), so files
+// are always served back from where they were saved regardless of pm2's cwd.
+const { LOCAL_UPLOAD_DIR } = require('./config/storage');
 try {
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+  if (!fs.existsSync(LOCAL_UPLOAD_DIR)) fs.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
 } catch (e) {
   console.warn('Could not create local uploads dir (expected on serverless):', e.message);
 }
 
-// Serve uploaded images
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+// Serve uploaded images (only used when storing on local disk; Cloudinary URLs
+// are absolute and bypass this route entirely).
+app.use('/uploads', express.static(LOCAL_UPLOAD_DIR, {
   setHeaders: (res, path) => {
     res.setHeader('X-Content-Type-Options', 'nosniff'); // Prevent MIME sniffing
   }
@@ -109,6 +112,9 @@ app.use('/api/assignments', requireAdmin, assignmentsRouter);
 const certificatesRouter = require('./routes/certificates');
 app.use('/api/certificates', requireAdmin, certificatesRouter);
 
+const certificateTemplatesRouter = require('./routes/certificate-templates');
+app.use('/api/certificate-templates', requireAdmin, certificateTemplatesRouter);
+
 const announcementsRouter = require('./routes/announcements');
 app.use('/api/announcements', requireAdmin, announcementsRouter);
 
@@ -150,6 +156,13 @@ app.use('/api/hero-slides', requireAdmin, heroSlidesRouter);
 
 const teachersRouter = require('./routes/teachers');
 app.use('/api/teachers', teachersRouter); // Middleware is now handled inside teachers.js
+
+const communicationsRouter = require('./routes/communications');
+app.use('/api/communications', requireAdmin, communicationsRouter);
+
+// Teacher portal (auth handled inside via requireTeacher).
+const teacherPortalRouter = require('./routes/teacher-portal');
+app.use('/api/teacher-portal', teacherPortalRouter);
 
 // Start the notification scheduler
 const notificationScheduler = require('./scripts/notification-scheduler');

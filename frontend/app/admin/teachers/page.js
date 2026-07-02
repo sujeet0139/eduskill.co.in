@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge, Alert } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY_FORM = {
   name: "",
@@ -41,6 +42,18 @@ export default function AdminTeachers() {
   const [saving, setSaving] = useState(false);
 
   const token = () => adminAuth.token();
+  const notify = useToast();
+
+  // Set / generate a teacher's portal login password.
+  const setPassword = async (t) => {
+    const entered = window.prompt(`Set a login password for ${t.name} (leave blank to auto-generate):`, "");
+    if (entered === null) return; // cancelled
+    try {
+      const res = await api.put(`/api/teachers/${t.id}/set-password`, entered ? { password: entered } : {}, token());
+      const pwd = res.password || entered;
+      window.prompt(`Password set for ${t.email}. Copy & share it with the teacher:`, pwd);
+    } catch (e) { notify.error(e.message); }
+  };
 
   // Load teachers from backend API
   const load = () => {
@@ -180,12 +193,12 @@ export default function AdminTeachers() {
 
   // Delete Teacher
   const remove = async (id) => {
-    if (!confirm("Are you sure you want to delete this teacher? This action cannot be undone.")) return;
+    if (!(await notify.confirm("Are you sure you want to delete this teacher? This action cannot be undone."))) return;
     try {
       await api.del(`/api/teachers/${id}`, token());
       load();
     } catch (err) {
-      alert(err.message || "Failed to delete teacher.");
+      notify.error(err.message || "Failed to delete teacher.");
     }
   };
 
@@ -301,6 +314,12 @@ export default function AdminTeachers() {
                       className="rounded bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-200"
                     >
                       Edit
+                    </button>
+                    <button
+                      onClick={() => setPassword(t)}
+                      className="rounded bg-purple-100 px-2 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-200"
+                    >
+                      Password
                     </button>
                     <button
                       onClick={() => remove(t.id)}

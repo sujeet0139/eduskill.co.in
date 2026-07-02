@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { useToast } from "@/components/Toast";
 
 const EMPTY = { name: "", college_id: "", semester_count: 6, is_active: 1 };
 
@@ -16,6 +17,7 @@ export default function AdminDepartments() {
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const token = () => adminAuth.token();
+  const notify = useToast();
 
   const load = () => {
     api.get("/api/departments", token()).then((d) => setDepartments(d.departments || [])).catch((e) => setError(e.message));
@@ -37,11 +39,11 @@ export default function AdminDepartments() {
       if (editId) await api.put(`/api/departments/${editId}`, payload, token());
       else await api.post("/api/departments", payload, token());
       setModal(false); load();
-    } catch (err) { alert(err.message); }
+    } catch (err) { notify.error(err.message); }
   };
   const remove = async (id) => {
-    if (!confirm("Delete this department?")) return;
-    try { await api.del(`/api/departments/${id}`, token()); load(); } catch (e) { alert(e.message); }
+    if (!(await notify.confirm("Delete this department?"))) return;
+    try { await api.del(`/api/departments/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
   return (

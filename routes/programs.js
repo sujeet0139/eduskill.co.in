@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { requireAdmin } = require('../middleware/authMiddleware');
 
 // GET ALL PROGRAMS
 router.get('/', async (req, res) => {
@@ -15,7 +16,7 @@ router.get('/', async (req, res) => {
 });
 
 // CREATE NEW PROGRAM
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   const { title, description, duration_weeks, fee, start_date, end_date, max_enrollment, status } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -32,7 +33,7 @@ router.post('/', async (req, res) => {
 });
 
 // UPDATE PROGRAM
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   const { title, description, duration_weeks, fee, start_date, end_date, max_enrollment, status } = req.body;
   try {
     const connection = await pool.getConnection();
@@ -48,7 +49,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE PROGRAM
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const connection = await pool.getConnection();
     await connection.query('DELETE FROM programs WHERE id=?', [req.params.id]);

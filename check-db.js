@@ -231,6 +231,10 @@ async function checkDatabase() {
       )
     `);
     await runAlterIfMissing('study_materials', 'category', "ALTER TABLE study_materials ADD COLUMN category VARCHAR(100) AFTER description");
+    // Organize materials by course / program / subject (all optional).
+    await runAlterIfMissing('study_materials', 'course_id', "ALTER TABLE study_materials ADD COLUMN course_id INT AFTER category");
+    await runAlterIfMissing('study_materials', 'program_id', "ALTER TABLE study_materials ADD COLUMN program_id INT AFTER course_id");
+    await runAlterIfMissing('study_materials', 'subject', "ALTER TABLE study_materials ADD COLUMN subject VARCHAR(100) AFTER program_id");
 
     // 6. PROGRAMS TABLE
     await connection.query(`
@@ -344,6 +348,26 @@ async function checkDatabase() {
       )
     `);
 
+    // 9b. Assignment targeting: who receives an assignment.
+    // audience: all | course | program | batch | selected
+    await runAlterIfMissing('assignments', 'audience', "ALTER TABLE assignments ADD COLUMN audience VARCHAR(20) DEFAULT 'all' AFTER program_id");
+    await runAlterIfMissing('assignments', 'batch_id', "ALTER TABLE assignments ADD COLUMN batch_id INT AFTER audience");
+    await runAlterIfMissing('assignments', 'created_by', "ALTER TABLE assignments ADD COLUMN created_by VARCHAR(100) AFTER submission_type");
+    await runAlterIfMissing('assignments', 'created_by_role', "ALTER TABLE assignments ADD COLUMN created_by_role VARCHAR(20) AFTER created_by");
+    // Explicit recipient list for audience = 'selected' / single student.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS assignment_targets (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        assignment_id INT NOT NULL,
+        student_id INT NOT NULL,
+        FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_target (assignment_id, student_id)
+      )
+    `);
+    // Ensure one submission row per (assignment, student) so re-submits upsert.
+    await runAlterIfMissing('assignment_submissions', 'unique_submission_key', "ALTER TABLE assignment_submissions ADD UNIQUE KEY unique_submission (assignment_id, student_id)");
+
     // 10. CERTIFICATES
     await connection.query(`
       CREATE TABLE IF NOT EXISTS certificates (
@@ -366,6 +390,31 @@ async function checkDatabase() {
     await runAlterIfMissing('certificates', 'final_score_percent', "ALTER TABLE certificates ADD COLUMN final_score_percent DECIMAL(5,2)");
     try { await connection.query("ALTER TABLE certificates ADD CONSTRAINT fk_cert_course FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL"); } catch(e){}
     try { await connection.query("ALTER TABLE certificates ADD CONSTRAINT fk_cert_program FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE SET NULL"); } catch(e){}
+
+    // 10b. CERTIFICATE TEMPLATES — designable, mapped to a course/program (or default).
+    // Body supports placeholders: {{name}} {{course}} {{college}} {{date}} {{score}} {{cert_no}}
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS certificate_templates (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        name VARCHAR(150) NOT NULL,
+        heading VARCHAR(200) DEFAULT 'Certificate of Completion',
+        body TEXT,
+        logo_url VARCHAR(255),
+        seal_url VARCHAR(255),
+        accent_color VARCHAR(20) DEFAULT '#1e3a8a',
+        sig1_name VARCHAR(120), sig1_title VARCHAR(120), sig1_image VARCHAR(255),
+        sig2_name VARCHAR(120), sig2_title VARCHAR(120), sig2_image VARCHAR(255),
+        sig3_name VARCHAR(120), sig3_title VARCHAR(120), sig3_image VARCHAR(255),
+        course_id INT,
+        program_id INT,
+        is_default TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL,
+        FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE SET NULL
+      )
+    `);
+    // Link a certificate to the template it was issued with (snapshotted at issue time).
+    await runAlterIfMissing('certificates', 'template_id', "ALTER TABLE certificates ADD COLUMN template_id INT");
 
     // 11. ANNOUNCEMENTS & SETTINGS
     await connection.query(`CREATE TABLE IF NOT EXISTS announcements (id INT PRIMARY KEY AUTO_INCREMENT, title VARCHAR(200) NOT NULL, message TEXT NOT NULL, target_type VARCHAR(50), target_id INT, send_email BOOLEAN DEFAULT FALSE, scheduled_at DATETIME, status VARCHAR(50) DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
@@ -576,6 +625,20 @@ async function checkDatabase() {
       )
     `);
 
+    // 20b. COMMUNICATION LOGS (email / WhatsApp broadcast history)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS communication_logs (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        channel ENUM('email', 'whatsapp') NOT NULL,
+        subject VARCHAR(255),
+        audience TEXT,
+        recipient_count INT DEFAULT 0,
+        sent_count INT DEFAULT 0,
+        sent_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // 21. TEACHERS TABLE
     await connection.query(`
       CREATE TABLE IF NOT EXISTS teachers (
@@ -603,6 +666,8 @@ async function checkDatabase() {
         INDEX idx_teacher_id (teacher_id),
         INDEX idx_status (status)
       )`);
+    // Teacher login credential (set by admin). Teachers log in at /teacher.
+    await runAlterIfMissing('teachers', 'password_hash', "ALTER TABLE teachers ADD COLUMN password_hash VARCHAR(255) AFTER email");
 
     // 22. STUDENT DOCUMENTS TABLE
     await connection.query(`

@@ -66,6 +66,9 @@ export default function StudentLoginPage() {
           </button>
         </form>
 
+        <p className="mt-3 text-center text-sm">
+          <Link href="/forgot-password" className="font-medium text-blue-700 hover:underline">Forgot password?</Link>
+        </p>
         <p className="mt-4 text-center text-sm text-gray-500">
           New here?{" "}
           <Link href="/register" className="font-medium text-blue-700 hover:underline">Create an account</Link>
