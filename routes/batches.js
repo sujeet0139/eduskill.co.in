@@ -13,17 +13,18 @@ function validateBatchDates(start_date, end_date) {
   return null;
 }
 
-// GET ALL BATCHES (with course/program/mentor names)
+// GET ALL BATCHES (with course/program/mentor/teacher names)
 router.get('/', async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
     const [batches] = await connection.query(`
-      SELECT b.*, c.title AS course_title, p.title AS program_title, f.name AS mentor_name
+      SELECT b.*, c.title AS course_title, p.title AS program_title, f.name AS mentor_name, t.name AS teacher_name
       FROM batches b
       LEFT JOIN courses c ON b.course_id = c.id
       LEFT JOIN programs p ON b.program_id = p.id
       LEFT JOIN faculty f ON b.mentor_id = f.id
+      LEFT JOIN teachers t ON b.teacher_id = t.id
       ORDER BY b.start_date DESC, b.id DESC
     `);
     res.json({ success: true, batches });
@@ -36,16 +37,16 @@ router.get('/', async (req, res) => {
 
 // CREATE BATCH
 router.post('/', async (req, res) => {
-  const { name, course_id, program_id, mentor_id, start_date, end_date, max_students, status } = req.body;
+  const { name, course_id, program_id, mentor_id, teacher_id, start_date, end_date, max_students, status } = req.body;
   let connection;
   try {
     const dateErr = validateBatchDates(start_date, end_date);
     if (dateErr) return res.status(400).json({ error: dateErr });
     connection = await pool.getConnection();
     await connection.query(
-      `INSERT INTO batches (name, course_id, program_id, mentor_id, start_date, end_date, max_students, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, course_id || null, program_id || null, mentor_id || null, start_date || null, end_date || null, max_students || 30, status || 'open']
+      `INSERT INTO batches (name, course_id, program_id, mentor_id, teacher_id, start_date, end_date, max_students, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, course_id || null, program_id || null, mentor_id || null, teacher_id || null, start_date || null, end_date || null, max_students || 30, status || 'open']
     );
     res.json({ success: true, message: 'Batch created successfully' });
   } catch (error) {
@@ -57,15 +58,15 @@ router.post('/', async (req, res) => {
 
 // UPDATE BATCH
 router.put('/:id', async (req, res) => {
-  const { name, course_id, program_id, mentor_id, start_date, end_date, max_students, status } = req.body;
+  const { name, course_id, program_id, mentor_id, teacher_id, start_date, end_date, max_students, status } = req.body;
   let connection;
   try {
     const dateErr = validateBatchDates(start_date, end_date);
     if (dateErr) return res.status(400).json({ error: dateErr });
     connection = await pool.getConnection();
     await connection.query(
-      `UPDATE batches SET name=?, course_id=?, program_id=?, mentor_id=?, start_date=?, end_date=?, max_students=?, status=? WHERE id=?`,
-      [name, course_id || null, program_id || null, mentor_id || null, start_date || null, end_date || null, max_students || 30, status, req.params.id]
+      `UPDATE batches SET name=?, course_id=?, program_id=?, mentor_id=?, teacher_id=?, start_date=?, end_date=?, max_students=?, status=? WHERE id=?`,
+      [name, course_id || null, program_id || null, mentor_id || null, teacher_id || null, start_date || null, end_date || null, max_students || 30, status, req.params.id]
     );
     res.json({ success: true, message: 'Batch updated successfully' });
   } catch (error) {

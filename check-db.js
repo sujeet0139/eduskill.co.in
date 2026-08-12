@@ -428,6 +428,14 @@ async function checkDatabase() {
       )
     `);
 
+    // Item #27's "view of only their assigned batches" needs a real link
+    // from a batch to the teacher who logs into the teacher portal. The
+    // pre-existing `mentor_id` points at the separate, login-less `faculty`
+    // table (used elsewhere as a lightweight guest-mentor reference) --
+    // deliberately left untouched. This is a second, additive assignment.
+    await runAlterIfMissing('batches', 'teacher_id', "ALTER TABLE batches ADD COLUMN teacher_id INT AFTER mentor_id");
+    try { await connection.query("ALTER TABLE batches ADD CONSTRAINT fk_batch_teacher FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE SET NULL"); } catch (e) {}
+
     // 8. COURSE MODULES & LESSONS
     await connection.query(`
       CREATE TABLE IF NOT EXISTS course_modules (
@@ -598,6 +606,12 @@ async function checkDatabase() {
     // Safely add new columns if they don't exist
     await runAlterIfMissing('live_classes', 'is_24hr_reminder_sent', "ALTER TABLE live_classes ADD COLUMN is_24hr_reminder_sent BOOLEAN DEFAULT FALSE");
     await runAlterIfMissing('live_classes', 'is_1hr_reminder_sent', "ALTER TABLE live_classes ADD COLUMN is_1hr_reminder_sent BOOLEAN DEFAULT FALSE");
+    // Item #27 -- a "session" a teacher marks attendance for needs to be
+    // scoped to their specific batch (existing course_id is shared by every
+    // batch of that course). Nullable/additive: existing rows just aren't
+    // batch-scoped, same as before.
+    await runAlterIfMissing('live_classes', 'batch_id', "ALTER TABLE live_classes ADD COLUMN batch_id INT AFTER course_id");
+    try { await connection.query("ALTER TABLE live_classes ADD CONSTRAINT fk_liveclass_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL"); } catch (e) {}
 
     // 13. CLASS ATTENDANCE
     await connection.query(`
@@ -816,6 +830,9 @@ async function checkDatabase() {
       )`);
     // Teacher login credential (set by admin). Teachers log in at /teacher.
     await runAlterIfMissing('teachers', 'password_hash', "ALTER TABLE teachers ADD COLUMN password_hash VARCHAR(255) AFTER email");
+    // Self-authored profile bio (item #27) -- distinct from `remarks`, which
+    // is an admin-only internal note.
+    await runAlterIfMissing('teachers', 'bio', "ALTER TABLE teachers ADD COLUMN bio TEXT AFTER expertise");
 
     // 22. STUDENT DOCUMENTS TABLE
     await connection.query(`
