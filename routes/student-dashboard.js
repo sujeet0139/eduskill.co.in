@@ -15,13 +15,13 @@ const submissionUpload = makeUpload({
 
 // GET /api/student-dashboard/profile - Fetch student profile
 router.get('/profile', requireStudent, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [students] = await connection.query(
       'SELECT id, reference_no, name, email, phone, college_id, department, status, created_at FROM students WHERE id = ?',
       [req.user.id]
     );
-    connection.release();
 
     if (students.length === 0) {
       return res.status(404).json({ error: 'Student not found' });
@@ -31,23 +31,27 @@ router.get('/profile', requireStudent, async (req, res) => {
   } catch (error) {
     console.error('Error fetching student profile:', error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET /api/student-dashboard/certificates - Fetch student certificates
 router.get('/certificates', requireStudent, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [certificates] = await connection.query(
       'SELECT * FROM certificates WHERE student_id = ? AND status = "active"',
       [req.user.id]
     );
-    connection.release();
 
     res.json({ success: true, certificates });
   } catch (error) {
     console.error('Error fetching certificates:', error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -56,8 +60,9 @@ router.get('/certificates', requireStudent, async (req, res) => {
 // with their own submission (if any) joined in.
 router.get('/assignments', requireStudent, async (req, res) => {
   const sid = req.user.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [assignments] = await connection.query(`
       SELECT DISTINCT a.id, a.title, a.description, a.due_date, a.max_marks, a.submission_type, a.audience,
         c.title AS course_title, p.title AS program_title,
@@ -76,10 +81,11 @@ router.get('/assignments', requireStudent, async (req, res) => {
         OR (a.audience = 'selected' AND a.id IN (SELECT assignment_id FROM assignment_targets WHERE student_id = ?))
       ORDER BY a.due_date IS NULL, a.due_date ASC, a.created_at DESC
     `, [sid, sid, sid, sid, sid, sid]);
-    connection.release();
     res.json({ success: true, assignments });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -92,11 +98,12 @@ router.post('/assignments/:id/submit', requireStudent, submissionUpload.single('
   if (!url && !text_answer) {
     return res.status(400).json({ error: 'Attach a file or write an answer.' });
   }
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     // Confirm the assignment exists (light guard).
     const [[assignment]] = await connection.query('SELECT id FROM assignments WHERE id = ?', [assignmentId]);
-    if (!assignment) { connection.release(); return res.status(404).json({ error: 'Assignment not found.' }); }
+    if (!assignment) { return res.status(404).json({ error: 'Assignment not found.' }); }
 
     await connection.query(
       `INSERT INTO assignment_submissions (assignment_id, student_id, file_url, text_answer, status, submitted_at)
@@ -104,10 +111,11 @@ router.post('/assignments/:id/submit', requireStudent, submissionUpload.single('
        ON DUPLICATE KEY UPDATE file_url = VALUES(file_url), text_answer = VALUES(text_answer), status = 'pending', submitted_at = NOW()`,
       [assignmentId, sid, url || null, text_answer || null]
     );
-    connection.release();
     res.json({ success: true, message: 'Submission received.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -115,8 +123,9 @@ router.post('/assignments/:id/submit', requireStudent, submissionUpload.single('
 // to their enrolled courses/programs, plus general (untagged) materials.
 router.get('/materials', requireStudent, async (req, res) => {
   const sid = req.user.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [materials] = await connection.query(`
       SELECT m.*, c.title AS course_title, p.title AS program_title
       FROM study_materials m
@@ -129,10 +138,11 @@ router.get('/materials', requireStudent, async (req, res) => {
       )
       ORDER BY m.subject IS NULL, m.subject ASC, m.created_at DESC
     `, [sid, sid]);
-    connection.release();
     res.json({ success: true, materials });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -140,8 +150,9 @@ router.get('/materials', requireStudent, async (req, res) => {
 // (targeted to their college / enrolled course, or open to all).
 router.get('/live-classes', requireStudent, async (req, res) => {
   const sid = req.user.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[me]] = await connection.query('SELECT college_id FROM students WHERE id = ?', [sid]);
     const collegeId = me ? me.college_id : null;
     const [classes] = await connection.query(`
@@ -155,10 +166,11 @@ router.get('/live-classes', requireStudent, async (req, res) => {
       ORDER BY lc.scheduled_at DESC
       LIMIT 30
     `, [collegeId, sid]);
-    connection.release();
     res.json({ success: true, classes });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

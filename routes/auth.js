@@ -74,18 +74,18 @@ router.post('/login', async (req, res) => {
 // ADMIN LOGIN ENDPOINT
 router.post('/admin/login', async (req, res) => {
   const { email, password } = req.body;
-  
+  let connection;
+
   try {
     if (!email || !password) {
       return res.status(400).json({ error: 'Please provide email and password' });
     }
 
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [admins] = await connection.query(
       'SELECT * FROM admin_users WHERE email = ?',
       [email]
     );
-    connection.release();
 
     if (admins.length === 0) {
       return res.status(401).json({ error: 'Invalid admin credentials' });
@@ -101,24 +101,26 @@ router.post('/admin/login', async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid admin credentials' });
     }
-    
+
     const token = issueSession(res, { id: admin.id, role: admin.role, email: admin.email });
 
     return res.json({ success: true, token, admin: { email: admin.email, role: admin.role, name: admin.name } });
   } catch (error) {
     console.error('Admin login error:', error);
     res.status(500).json({ error: 'Internal server error during admin login' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // TEACHER LOGIN — verifies against teachers.email + password_hash.
 router.post('/teacher/login', async (req, res) => {
   const { email, password } = req.body;
+  let connection;
   try {
     if (!email || !password) return res.status(400).json({ error: 'Please provide email and password' });
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [teachers] = await connection.query('SELECT * FROM teachers WHERE email = ?', [email]);
-    connection.release();
     if (teachers.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
     const teacher = teachers[0];
     if (teacher.status && teacher.status !== 'Active') {
@@ -135,6 +137,8 @@ router.post('/teacher/login', async (req, res) => {
   } catch (error) {
     console.error('Teacher login error:', error);
     res.status(500).json({ error: 'Internal server error during login' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -151,7 +155,6 @@ router.post('/admin/request-password-reset', requireAdmin, async (req, res) => {
     const [[student]] = await connection.query('SELECT id, email, name FROM students WHERE id = ?', [studentId]);
 
     if (!student) {
-      connection.release();
       return res.status(404).json({ error: 'Student not found.' });
     }
 
@@ -166,7 +169,6 @@ router.post('/admin/request-password-reset', requireAdmin, async (req, res) => {
       'UPDATE students SET reset_token = ?, reset_token_expiry = ? WHERE id = ?',
       [hashedToken, expiryDate, student.id]
     );
-    connection.release();
 
     // Send the email with the unhashed token
     await sendPasswordResetEmail(student.email, student.name, resetToken);
@@ -174,8 +176,9 @@ router.post('/admin/request-password-reset', requireAdmin, async (req, res) => {
     res.json({ success: true, message: `Password reset email sent to ${student.email}.` });
 
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: 'Failed to send password reset email', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -199,11 +202,11 @@ router.post('/forgot-password', async (req, res) => {
       );
       await sendPasswordResetEmail(student.email, student.name, resetToken);
     }
-    connection.release();
     res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: 'Failed to process request', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -222,7 +225,6 @@ router.post('/reset-password', async (req, res) => {
       [hashedToken]
     );
     if (!student) {
-      connection.release();
       return res.status(400).json({ error: 'This reset link is invalid or has expired. Please request a new one.' });
     }
     const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
@@ -230,11 +232,11 @@ router.post('/reset-password', async (req, res) => {
       'UPDATE students SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?',
       [passwordHash, student.id]
     );
-    connection.release();
     res.json({ success: true, message: 'Password has been reset. You can now log in with your new password.' });
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: 'Failed to reset password', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

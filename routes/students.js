@@ -117,15 +117,27 @@ router.post('/register', async (req, res) => {
 });
 
 // GET ALL STUDENTS (ADMIN)
+// Supports server-side search/filter/sort/pagination (dev-prompt item #15,
+// #17) — all combine via plain AND, no page reload needed on the frontend.
+const SORTABLE_COLUMNS = {
+  name: 's.name',
+  created_at: 's.created_at',
+  registration_date: 's.created_at',
+};
+const PAGE_SIZES = [25, 50, 100];
+
 router.get('/', requireAdmin, async (req, res) => {
-  const { district, collegeId, status, paymentStatus } = req.query;
+  const {
+    district, collegeId, status, paymentStatus, programId,
+    q, enrollmentStatus, isActive,
+    sortBy = 'created_at', sortDir = 'desc',
+    page = '1', pageSize = '25',
+  } = req.query;
   let connection;
   try {
     connection = await pool.getConnection();
 
-    let query = `
-      SELECT s.*, c.name as college_name, d.name as district_name,
-             (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = 'completed') as total_paid
+    let fromClause = `
       FROM students s
       LEFT JOIN colleges c ON s.college_id = c.id
       LEFT JOIN districts d ON c.district_id = d.id
@@ -133,23 +145,57 @@ router.get('/', requireAdmin, async (req, res) => {
     `;
     const params = [];
 
-    if (district) { query += ' AND d.id = ?'; params.push(district); }
-    if (collegeId) { query += ' AND c.id = ?'; params.push(collegeId); }
-    if (status) { query += ' AND s.status = ?'; params.push(status); }
-
-    if (paymentStatus === 'paid') {
-      query += ' AND (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") > 0';
-    } else if (paymentStatus === 'unpaid') {
-      query += ' AND ((SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") IS NULL OR (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") = 0)';
+    if (district) { fromClause += ' AND d.id = ?'; params.push(district); }
+    if (collegeId) { fromClause += ' AND c.id = ?'; params.push(collegeId); }
+    if (status) { fromClause += ' AND s.status = ?'; params.push(status); }
+    // Guest/Enrolled (item #16) — automatic field, filterable here.
+    if (enrollmentStatus === 'guest' || enrollmentStatus === 'enrolled') {
+      fromClause += ' AND s.enrollment_status = ?'; params.push(enrollmentStatus);
+    }
+    // Active/Inactive (item #18) — separate manual toggle.
+    if (isActive === 'true' || isActive === 'false') {
+      fromClause += ' AND s.is_active = ?'; params.push(isActive === 'true' ? 1 : 0);
+    }
+    if (programId) {
+      fromClause += ' AND EXISTS (SELECT 1 FROM student_programs sp WHERE sp.student_id = s.id AND sp.program_id = ?)';
+      params.push(programId);
+    }
+    if (q) {
+      const like = `%${q}%`;
+      fromClause += ' AND (s.name LIKE ? OR s.phone LIKE ? OR s.email LIKE ? OR s.reference_no LIKE ?)';
+      params.push(like, like, like, like);
     }
 
-    query += ' ORDER BY s.created_at DESC';
+    if (paymentStatus === 'paid') {
+      fromClause += ' AND (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") > 0';
+    } else if (paymentStatus === 'unpaid') {
+      fromClause += ' AND ((SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") IS NULL OR (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") = 0)';
+    }
 
-    const [students] = await connection.query(query, params);
+    const [[{ total }]] = await connection.query(`SELECT COUNT(*) as total ${fromClause}`, params);
+
+    const sortColumn = SORTABLE_COLUMNS[sortBy] || SORTABLE_COLUMNS.created_at;
+    const sortDirection = String(sortDir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const size = PAGE_SIZES.includes(Number(pageSize)) ? Number(pageSize) : 25;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const offset = (pageNum - 1) * size;
+
+    const query = `
+      SELECT s.*, c.name as college_name, d.name as district_name,
+             (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = 'completed') as total_paid
+      ${fromClause}
+      ORDER BY ${sortColumn} ${sortDirection}
+      LIMIT ? OFFSET ?
+    `;
+    const [students] = await connection.query(query, [...params, size, offset]);
 
     res.json({
       success: true,
       count: students.length,
+      total,
+      page: pageNum,
+      pageSize: size,
+      totalPages: Math.max(1, Math.ceil(total / size)),
       students: students
     });
   } catch (error) {
@@ -276,6 +322,7 @@ router.get('/:id/full-profile', requireAdmin, async (req, res) => {
         JOIN registration_fields rf ON scf.field_id = rf.id
         WHERE scf.student_id = ?`, [studentId]),
       connection.query(`SELECT sp.*, p.title as program_title FROM student_programs sp JOIN programs p ON sp.program_id = p.id WHERE sp.student_id = ?`, [studentId]),
+      connection.query(`SELECT * FROM student_education WHERE student_id = ? ORDER BY level`, [studentId]),
     ]);
 
     const warnings = [];
@@ -287,7 +334,7 @@ router.get('/:id/full-profile', requireAdmin, async (req, res) => {
     };
     const [
       totalPaidRows, paymentsRows, coursesRows, attendanceRows,
-      assignmentsRows, documentsRows, certificatesRows, customFieldsRows, internshipsRows,
+      assignmentsRows, documentsRows, certificatesRows, customFieldsRows, internshipsRows, educationRows,
     ] = sections;
 
     const financialTotal = rowsOf(totalPaidRows, 'financial_total', [{ total_paid: 0 }])[0];
@@ -299,6 +346,22 @@ router.get('/:id/full-profile', requireAdmin, async (req, res) => {
     const certificates = rowsOf(certificatesRows, 'certificates', []);
     const customFields = rowsOf(customFieldsRows, 'customFields', []);
     const internships = rowsOf(internshipsRows, 'internships', []);
+    const education = rowsOf(educationRows, 'education', []);
+
+    // Aadhaar is a restricted field (dev-prompt item #12) — log every time an
+    // admin's view of this profile surfaces it. Awaited (it's a small local
+    // insert, not an external call) but failure here must never break loading
+    // the rest of the profile, so it's caught and only logged, not thrown.
+    if (basic.aadhar) {
+      try {
+        await connection.query(
+          'INSERT INTO sensitive_field_access_log (student_id, field_name, accessed_by_admin_id, accessed_by_email) VALUES (?, ?, ?, ?)',
+          [studentId, 'aadhar', req.admin && req.admin.id, req.admin && req.admin.email]
+        );
+      } catch (e) {
+        console.error('sensitive_field_access_log insert failed:', e.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -307,6 +370,7 @@ router.get('/:id/full-profile', requireAdmin, async (req, res) => {
         financial: { wallet_balance: basic.wallet_balance, total_paid: financialTotal.total_paid || 0, payments },
         learning: { courses, attended_classes: attendance.attended_classes, assignments, certificates, documents, customFields },
         internships,
+        education,
         // Non-fatal — lets the admin panel show "some details couldn't load"
         // instead of silently rendering zeros/empties as if that were real data.
         warnings: warnings.length ? warnings : undefined,
@@ -447,6 +511,26 @@ router.put('/:id/verify', requireAdmin, async (req, res) => {
     const [[student]] = await connection.query('SELECT phone FROM students WHERE id = ?', [req.params.id]);
     if (student) notifyStudent(student.phone, 'Your EduSkill account has been verified. You can now log in.');
     res.json({ success: true, message: 'Student verified successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// TOGGLE ACTIVE/INACTIVE (dev-prompt item #18) — a manual override, separate
+// from the automatic `enrollment_status` (guest/enrolled). Lets an admin mark
+// e.g. an Enrolled student "on a break" Inactive without losing Enrolled history.
+router.put('/:id/active-status', requireAdmin, async (req, res) => {
+  const { isActive } = req.body;
+  if (typeof isActive !== 'boolean') {
+    return res.status(400).json({ error: 'isActive (boolean) is required.' });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.query('UPDATE students SET is_active = ? WHERE id = ?', [isActive, req.params.id]);
+    res.json({ success: true, message: `Student marked ${isActive ? 'Active' : 'Inactive'}.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {

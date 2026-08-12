@@ -4,73 +4,85 @@ const pool = require('../config/db');
 
 // GET /api/public/hero-slides - Fetch active slides for the homepage carousel
 router.get('/hero-slides', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [slides] = await connection.query(
       'SELECT * FROM hero_slides WHERE is_active = TRUE ORDER BY order_no ASC, id ASC'
     );
-    connection.release();
     res.json({ success: true, slides });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch slides', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET /api/public/registration-form - Fetch enabled fields for the student registration form
 router.get('/registration-form', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     // Select only the necessary fields to expose publicly
     const [fields] = await connection.query(
       "SELECT field_name, label, type, is_mandatory, options FROM registration_fields WHERE is_enabled = TRUE ORDER BY order_no ASC"
     );
-    connection.release();
     res.json({ success: true, fields });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch form configuration', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET /api/public/colleges - Fetch all colleges for dropdowns + homepage list
 router.get('/colleges', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [colleges] = await connection.query(
       `SELECT c.id, c.name, d.name AS district
        FROM colleges c LEFT JOIN districts d ON c.district_id = d.id
        ORDER BY c.name ASC`
     );
-    connection.release();
     res.json({ success: true, colleges });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch colleges', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET /api/public/courses - Published courses for the homepage / catalog
 router.get('/courses', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [courses] = await connection.query(
       `SELECT id, title, category, subject, description, duration_weeks, price, language, level
        FROM courses WHERE status = 'published' ORDER BY created_at DESC`
     );
-    connection.release();
     res.json({ success: true, courses });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch courses', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // Helper: read a whitelisted set of settings as a key/value object.
 async function readSettings(keys) {
-  const connection = await pool.getConnection();
-  const [rows] = await connection.query(
-    `SELECT setting_key, setting_value FROM settings WHERE setting_key IN (${keys.map(() => '?').join(',')})`,
-    keys
-  );
-  connection.release();
-  return rows.reduce((acc, r) => { acc[r.setting_key] = r.setting_value; return acc; }, {});
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [rows] = await connection.query(
+      `SELECT setting_key, setting_value FROM settings WHERE setting_key IN (${keys.map(() => '?').join(',')})`,
+      keys
+    );
+    return rows.reduce((acc, r) => { acc[r.setting_key] = r.setting_value; return acc; }, {});
+  } finally {
+    if (connection) connection.release();
+  }
 }
 
 // GET /api/public/payment-info - UPI ID, QR image and bank details for the student pay screen
@@ -85,8 +97,9 @@ router.get('/payment-info', async (req, res) => {
 
 // GET /api/public/stats - real counts for the homepage (students, colleges, courses, certificates)
 router.get('/stats', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const safeCount = async (sql) => {
       try { const [[r]] = await connection.query(sql); return r.c; } catch { return 0; }
     };
@@ -97,24 +110,27 @@ router.get('/stats', async (req, res) => {
       programs: await safeCount("SELECT COUNT(*) c FROM programs WHERE status = 'active'"),
       certificates: await safeCount("SELECT COUNT(*) c FROM certificates WHERE status = 'active'"),
     };
-    connection.release();
     res.json({ success: true, stats });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch stats', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET /api/public/announcements - latest sent announcements for the ticker
 router.get('/announcements', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [announcements] = await connection.query(
       "SELECT title, message, created_at FROM announcements WHERE status = 'sent' ORDER BY created_at DESC LIMIT 8"
     );
-    connection.release();
     res.json({ success: true, announcements });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch announcements', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

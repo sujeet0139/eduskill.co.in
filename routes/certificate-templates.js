@@ -42,8 +42,9 @@ async function resolveTemplateId(connection, { course_id, program_id }) {
 
 // LIST templates (with mapped course/program titles).
 router.get('/', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [templates] = await connection.query(`
       SELECT t.*, c.title AS course_title, p.title AS program_title
       FROM certificate_templates t
@@ -51,10 +52,11 @@ router.get('/', async (req, res) => {
       LEFT JOIN programs p ON t.program_id = p.id
       ORDER BY t.is_default DESC, t.created_at DESC
     `);
-    connection.release();
     res.json({ success: true, templates });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -123,13 +125,15 @@ router.put('/:id', async (req, res) => {
 
 // DELETE
 router.delete('/:id', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('DELETE FROM certificate_templates WHERE id = ?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Template deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

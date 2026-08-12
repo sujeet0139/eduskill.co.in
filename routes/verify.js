@@ -4,8 +4,9 @@ const pool = require('../config/db');
 
 // VERIFY CERTIFICATE VIA QR CODE/NUMBER
 router.get('/certificate/:certNo', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[certificate]] = await connection.query(`
       SELECT
         c.certificate_no, c.issued_date, c.status, c.final_score_percent,
@@ -23,7 +24,6 @@ router.get('/certificate/:certNo', async (req, res) => {
     `, [req.params.certNo]);
 
     if (!certificate) {
-      connection.release();
       return res.status(404).json({ success: false, message: 'Certificate not found or invalid.' });
     }
 
@@ -40,11 +40,12 @@ router.get('/certificate/:certNo', async (req, res) => {
         template = def || null;
       }
     } catch (e) { template = null; }
-    connection.release();
 
     res.json({ success: true, certificate, template });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

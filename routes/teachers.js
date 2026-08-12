@@ -14,16 +14,18 @@ router.put('/:id/set-password', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
   }
   if (!password) password = Math.random().toString(36).slice(-8);
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[teacher]] = await connection.query('SELECT id, email FROM teachers WHERE id = ?', [req.params.id]);
-    if (!teacher) { connection.release(); return res.status(404).json({ error: 'Teacher not found.' }); }
+    if (!teacher) { return res.status(404).json({ error: 'Teacher not found.' }); }
     const hash = await bcrypt.hash(password, await bcrypt.genSalt(10));
     await connection.query('UPDATE teachers SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Password updated.', email: teacher.email, password: generated ? password : undefined });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

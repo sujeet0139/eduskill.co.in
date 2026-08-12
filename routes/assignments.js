@@ -4,8 +4,9 @@ const pool = require('../config/db');
 
 // GET ALL ASSIGNMENTS (admin) — with course/program titles + submission count.
 router.get('/', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [assignments] = await connection.query(`
       SELECT a.*, c.title as course_title, p.title as program_title, b.name as batch_name,
         (SELECT COUNT(*) FROM assignment_submissions WHERE assignment_id = a.id) as total_submissions,
@@ -16,10 +17,11 @@ router.get('/', async (req, res) => {
       LEFT JOIN batches b ON a.batch_id = b.id
       ORDER BY a.created_at DESC
     `);
-    connection.release();
     res.json({ success: true, assignments });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -58,20 +60,23 @@ router.post('/', async (req, res) => {
 
 // DELETE AN ASSIGNMENT (cascades to submissions + targets).
 router.delete('/:id', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('DELETE FROM assignments WHERE id = ?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Assignment deleted.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET SUBMISSIONS FOR A SPECIFIC ASSIGNMENT
 router.get('/:id/submissions', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [submissions] = await connection.query(`
       SELECT sub.*, s.name as student_name, s.reference_no, c.name as college_name
       FROM assignment_submissions sub
@@ -80,28 +85,31 @@ router.get('/:id/submissions', async (req, res) => {
       WHERE sub.assignment_id = ?
       ORDER BY sub.submitted_at DESC
     `, [req.params.id]);
-    connection.release();
     res.json({ success: true, submissions });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GRADE A SUBMISSION
 router.put('/:id/submissions/:studentId/grade', async (req, res) => {
   const { marks, feedback, status } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `UPDATE assignment_submissions
        SET marks=?, feedback=?, status=?
        WHERE assignment_id=? AND student_id=?`,
       [marks ?? null, feedback || null, status || 'approved', req.params.id, req.params.studentId]
     );
-    connection.release();
     res.json({ success: true, message: 'Submission graded successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

@@ -4,9 +4,10 @@ const pool = require('../config/db');
 
 // GET ALL ANALYTICS REPORTS
 router.get('/summary', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     // 1. Student Status Breakdown
     const [studentStats] = await connection.query(`
       SELECT status, COUNT(*) as count 
@@ -39,13 +40,14 @@ router.get('/summary', async (req, res) => {
       ORDER BY month
     `);
 
-    connection.release();
-    res.json({ 
-      success: true, 
-      data: { studentStats, paymentStats, collegeStats, monthlyRegistrations } 
+    res.json({
+      success: true,
+      data: { studentStats, paymentStats, collegeStats, monthlyRegistrations }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -53,9 +55,10 @@ router.get('/summary', async (req, res) => {
 // 1. DASHBOARD OVERVIEW & REVENUE ANALYTICS
 // ==========================================
 router.get('/overview', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     // Revenue totals
     const [[revenue]] = await connection.query(`
       SELECT 
@@ -90,10 +93,11 @@ router.get('/overview', async (req, res) => {
       WHERE sc.id IS NOT NULL OR sp.id IS NOT NULL
     `);
 
-    connection.release();
     res.json({ success: true, data: { revenue, monthlyRevenue, revenueByCategory, activeStudents: activeStudents.count } });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -101,9 +105,10 @@ router.get('/overview', async (req, res) => {
 // 2. COURSE & INTERNSHIP ANALYTICS
 // ==========================================
 router.get('/courses', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     // Course Analytics
     const [courseStats] = await connection.query(`
       SELECT 
@@ -127,10 +132,11 @@ router.get('/courses', async (req, res) => {
       GROUP BY p.id
     `);
 
-    connection.release();
     res.json({ success: true, data: { courses: courseStats, programs: programStats } });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -138,9 +144,10 @@ router.get('/courses', async (req, res) => {
 // 3. STUDENT PERFORMANCE ANALYTICS
 // ==========================================
 router.get('/students', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     // Exam Performance Averages
     const [[examPerformance]] = await connection.query(`
       SELECT AVG(percentage) as average_score, COUNT(id) as total_attempts 
@@ -155,10 +162,11 @@ router.get('/students', async (req, res) => {
       WHERE status = 'active'
     `);
 
-    connection.release();
     res.json({ success: true, data: { examPerformance, certificateStats } });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -166,8 +174,9 @@ router.get('/students', async (req, res) => {
 // 4. RECENT ACTIVITY FEED + "NEEDS ATTENTION" COUNTS (dashboard)
 // ==========================================
 router.get('/activity', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     const [registrations] = await connection.query(`
       SELECT id, name, created_at FROM students ORDER BY created_at DESC LIMIT 6
@@ -191,7 +200,6 @@ router.get('/activity', async (req, res) => {
       classesToday = c.c;
     } catch (e) { /* ignore */ }
 
-    connection.release();
     res.json({
       success: true,
       data: {
@@ -202,6 +210,8 @@ router.get('/activity', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

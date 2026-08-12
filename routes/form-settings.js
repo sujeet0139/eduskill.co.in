@@ -5,13 +5,15 @@ const { requireAdmin } = require('../middleware/authMiddleware');
 
 // GET ALL REGISTRATION FIELDS
 router.get('/registration', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [fields] = await connection.query('SELECT * FROM registration_fields ORDER BY order_no ASC');
-    connection.release();
     res.json({ success: true, fields });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -38,17 +40,19 @@ router.post('/registration', requireAdmin, async (req, res) => {
   // Generate a unique field_name from the label
   const field_name = `custom_${label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO registration_fields (field_name, label, type, is_standard, is_enabled, is_mandatory, options)
        VALUES (?, ?, ?, FALSE, TRUE, ?, ?)`,
       [field_name, label, type, is_mandatory || false, optionsJson]
     );
-    connection.release();
     res.status(201).json({ success: true, message: 'Custom field created successfully.' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to create custom field', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -72,11 +76,12 @@ router.put('/registration', requireAdmin, async (req, res) => {
     }
 
     await connection.commit();
-    connection.release();
     res.json({ success: true, message: 'Registration form settings updated successfully.' });
   } catch (error) {
     if (connection) await connection.rollback();
     res.status(500).json({ error: 'Failed to update settings', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -93,11 +98,12 @@ router.put('/registration/reorder', requireAdmin, async (req, res) => {
       await connection.query('UPDATE registration_fields SET order_no = ? WHERE id = ?', [i, order[i]]);
     }
     await connection.commit();
-    connection.release();
     res.json({ success: true, message: 'Field order updated.' });
   } catch (error) {
-    if (connection) { await connection.rollback(); connection.release(); }
+    if (connection) { await connection.rollback(); }
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -110,7 +116,7 @@ router.put('/registration/:id', requireAdmin, async (req, res) => {
   try {
     connection = await pool.getConnection();
     const [[field]] = await connection.query('SELECT * FROM registration_fields WHERE id = ?', [req.params.id]);
-    if (!field) { connection.release(); return res.status(404).json({ error: 'Field not found.' }); }
+    if (!field) { return res.status(404).json({ error: 'Field not found.' }); }
 
     // Resolve final type + options (only custom fields may change type/options).
     let finalType = field.type;
@@ -120,7 +126,7 @@ router.put('/registration/:id', requireAdmin, async (req, res) => {
       if (finalType === 'select') {
         const list = Array.isArray(options) ? options : String(options || '').split(/\r?\n|,/);
         const cleaned = list.map((o) => String(o).trim()).filter(Boolean);
-        if (cleaned.length === 0) { connection.release(); return res.status(400).json({ error: 'A dropdown field needs at least one option.' }); }
+        if (cleaned.length === 0) { return res.status(400).json({ error: 'A dropdown field needs at least one option.' }); }
         finalOptions = JSON.stringify(cleaned);
       } else {
         finalOptions = null;
@@ -138,31 +144,33 @@ router.put('/registration/:id', requireAdmin, async (req, res) => {
         req.params.id,
       ]
     );
-    connection.release();
     res.json({ success: true, message: 'Field updated.' });
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // DELETE A CUSTOM FIELD
 router.delete('/registration/:id', requireAdmin, async (req, res) => {
   const fieldId = req.params.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     // Important: Only allow deleting non-standard fields to protect the system
     const [result] = await connection.query(
       'DELETE FROM registration_fields WHERE id = ? AND is_standard = FALSE',
       [fieldId]
     );
-    connection.release();
     if (result.affectedRows === 0) {
       return res.status(403).json({ error: 'Cannot delete a standard field or field not found.' });
     }
     res.json({ success: true, message: 'Custom field deleted successfully.' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete custom field', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

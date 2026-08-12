@@ -110,29 +110,33 @@ router.post('/email', requireAdmin, async (req, res) => {
 // LOG a WhatsApp broadcast (the actual sending is click-to-chat on the client).
 router.post('/log-whatsapp', requireAdmin, async (req, res) => {
   const { subject, recipient_count } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO communication_logs (channel, subject, audience, recipient_count, sent_count, sent_by)
        VALUES ('whatsapp', ?, ?, ?, ?, ?)`,
       [subject || 'WhatsApp broadcast', '{}', recipient_count || 0, recipient_count || 0, req.admin?.email || null]
     );
-    connection.release();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // Recent broadcast history.
 router.get('/history', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [logs] = await connection.query('SELECT * FROM communication_logs ORDER BY created_at DESC LIMIT 30');
-    connection.release();
     res.json({ success: true, logs });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

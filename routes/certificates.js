@@ -5,10 +5,11 @@ const { resolveTemplateId } = require('./certificate-templates');
 
 // GET ALL CERTIFICATES
 router.get('/', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [certificates] = await connection.query(`
-      SELECT c.*, s.name as student_name, s.reference_no, 
+      SELECT c.*, s.name as student_name, s.reference_no,
              co.title as course_title, p.title as program_title
       FROM certificates c
       JOIN students s ON c.student_id = s.id
@@ -16,10 +17,11 @@ router.get('/', async (req, res) => {
       LEFT JOIN programs p ON c.program_id = p.id
       ORDER BY c.issued_date DESC
     `);
-    connection.release();
     res.json({ success: true, certificates });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -33,8 +35,9 @@ router.post('/check-and-generate', async (req, res) => {
     return res.status(400).json({ error: 'student_id and either program_id or course_id are required.' });
   }
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     // 1. Check Attendance (Simplified)
     const [[total_classes]] = await connection.query(`SELECT COUNT(*) as count FROM live_classes WHERE program_id = ? OR course_id = ?`, [program_id || null, course_id || null]);
@@ -42,7 +45,6 @@ router.post('/check-and-generate', async (req, res) => {
     const attendance_percent = total_classes.count > 0 ? (attended_classes.count / total_classes.count) * 100 : 0;
 
     if (attendance_percent < ATTENDANCE_THRESHOLD) {
-      connection.release();
       return res.status(400).json({ success: false, message: `Student not eligible. Attendance is ${attendance_percent.toFixed(2)}%, requires ${ATTENDANCE_THRESHOLD}%.` });
     }
 
@@ -63,7 +65,6 @@ router.post('/check-and-generate', async (req, res) => {
     }
 
     if (final_score < PASSING_THRESHOLD) {
-      connection.release();
       return res.status(400).json({ success: false, message: `Student not eligible. Final score is ${final_score.toFixed(2)}%, requires ${PASSING_THRESHOLD}%.` });
     }
 
@@ -77,42 +78,47 @@ router.post('/check-and-generate', async (req, res) => {
       [student_id, course_id || null, program_id || null, certificate_no, new Date(), final_score, template_id]
     );
 
-    connection.release();
     res.json({ success: true, message: 'Student is eligible. Certificate generated successfully.', certificate_no });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // MANUAL GENERATE CERTIFICATE (Admin Override)
 router.post('/generate', async (req, res) => {
   const { student_id, course_id, program_id, issued_date } = req.body;
+  let connection;
   try {
     const certificate_no = 'CERT-' + Date.now();
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const template_id = await resolveTemplateId(connection, { course_id, program_id });
     await connection.query(
       `INSERT INTO certificates (student_id, course_id, program_id, certificate_no, issued_date, template_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [student_id, course_id || null, program_id || null, certificate_no, issued_date || new Date(), template_id]
     );
-    connection.release();
     res.json({ success: true, message: 'Certificate generated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // REVOKE CERTIFICATE
 router.delete('/:id', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('UPDATE certificates SET status = "revoked" WHERE id = ?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Certificate revoked successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

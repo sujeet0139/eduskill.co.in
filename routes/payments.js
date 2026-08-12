@@ -22,8 +22,9 @@ router.post('/initiate', async (req, res) => {
   // payment_plan: 'full', 'split', 'emi'
   // amount: optional custom amount the student chooses to pay now (>= min, <= total)
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     // Get item price and the admin-configured minimum first payment
     let itemPrice = 0;
@@ -83,7 +84,6 @@ router.post('/initiate', async (req, res) => {
         if (batch_id) await connection.query('UPDATE batches SET current_enrolled = current_enrolled + 1 WHERE id = ?', [batch_id]);
       }
 
-      connection.release();
       return res.json({ success: true, message: 'Enrolled successfully using wallet balance.', payment_type: 'wallet' });
     }
 
@@ -94,18 +94,15 @@ router.post('/initiate', async (req, res) => {
     if (amount !== undefined && amount !== null && amount !== '') {
       const chosen = Number(amount);
       if (isNaN(chosen) || chosen <= 0) {
-        connection.release();
         return res.status(400).json({ error: 'Enter a valid payment amount.' });
       }
       // The minimum only applies to the FIRST payment; once something is paid,
       // the student can pay any remaining amount.
       const floor = alreadyPaid > 0 ? 1 : (minPayment > 0 ? Math.min(minPayment, amountDue) : 1);
       if (chosen < floor) {
-        connection.release();
         return res.status(400).json({ error: `Minimum payment for this is ₹${floor}.` });
       }
       if (chosen > amountDue) {
-        connection.release();
         return res.status(400).json({ error: `Amount cannot exceed the balance due of ₹${amountDue}.` });
       }
       upfrontAmount = chosen;
@@ -142,8 +139,6 @@ router.post('/initiate', async (req, res) => {
       );
     }
 
-    connection.release();
-
     res.json({
       success: true,
       message: 'Payment initiated.',
@@ -156,6 +151,8 @@ router.post('/initiate', async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -164,27 +161,30 @@ router.post('/:id/upload-proof', upload.single('screenshot'), async (req, res) =
   const { transaction_id } = req.body;
   const screenshotPath = fileUrl(req.file);
 
+  let connection;
   try {
     if (!screenshotPath) {
       return res.status(400).json({ error: 'Screenshot file is required.' });
     }
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `UPDATE payments SET screenshot = ?, transaction_id = ?, payment_method = 'bank_transfer' WHERE id = ? AND status = 'pending'`,
       [screenshotPath, transaction_id, req.params.id]
     );
-    connection.release();
     res.json({ success: true, message: 'Payment proof uploaded for verification.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // 3. ADMIN: GET PAYMENTS (with filters)
 router.get('/', requireAdmin, async (req, res) => {
   const { status, student_id } = req.query;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     let query = `SELECT p.*, s.name as student_name, s.email as student_email, s.phone, s.reference_no as student_ref
                  FROM payments p JOIN students s ON p.student_id = s.id WHERE 1=1`;
     const params = [];
@@ -193,10 +193,11 @@ router.get('/', requireAdmin, async (req, res) => {
     query += ' ORDER BY p.created_at DESC';
 
     const [payments] = await connection.query(query, params);
-    connection.release();
     res.json({ success: true, payments });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -229,6 +230,15 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
 
     await connection.query('UPDATE students SET status = "verified" WHERE id = ? AND status = "registered"', [student_id]);
 
+    // Guest -> Enrolled (dev-prompt item #16): automatic, only on a real paid
+    // course/program (the flat one-time "registration" fee alone does NOT
+    // count, per the dev-prompt's own definition). Never flips back to guest
+    // here — "which course triggered it" is answered by this very payments
+    // row (payment_for_type/payment_for_id), so no separate column needed.
+    if (payment_for_type === 'course' || payment_for_type === 'program') {
+      await connection.query("UPDATE students SET enrollment_status = 'enrolled' WHERE id = ? AND enrollment_status = 'guest'", [student_id]);
+    }
+
     const [[student]] = await connection.query('SELECT name, email, phone FROM students WHERE id = ?', [student_id]);
 
     // Fire-and-forget — approving a payment must never hang on email/SMS/
@@ -250,29 +260,33 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
 // 5. ADMIN: REJECT/REFUND A PAYMENT
 router.post('/:id/reject', requireAdmin, async (req, res) => {
   const { notes } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(`UPDATE payments SET status = 'failed', notes = ? WHERE id = ?`, [notes, req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Payment marked as failed/rejected.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // 6. ADMIN: GET ALL PAYMENTS (alias of list, used by the admin payments page)
 router.get('/all', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [payments] = await connection.query(
       `SELECT p.*, s.name, s.email, s.phone, s.reference_no
        FROM payments p JOIN students s ON p.student_id = s.id
        ORDER BY p.created_at DESC`
     );
-    connection.release();
     res.json({ success: true, payments });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -282,24 +296,27 @@ router.post('/manual', requireAdmin, async (req, res) => {
   if (!studentId || !amount) {
     return res.status(400).json({ error: 'Student ID and amount are required.' });
   }
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO payments (student_id, amount, payment_for_type, payment_for_id, payment_method, status, payment_date, transaction_id)
        VALUES (?, ?, ?, ?, 'bank_transfer', 'completed', ?, ?)`,
       [studentId, amount, item_type || 'registration', item_id || null, paymentDate || new Date(), referenceNo || null]
     );
-    connection.release();
     res.json({ success: true, message: 'Manual payment recorded.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // 8. ADMIN: FINANCE SUMMARY — powers the finance command-center dashboard.
 router.get('/finance-summary', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     // Headline totals.
     const [[totals]] = await connection.query(`
@@ -339,10 +356,11 @@ router.get('/finance-summary', requireAdmin, async (req, res) => {
       FROM payments WHERE status = 'completed' GROUP BY payment_for_type
     `);
 
-    connection.release();
     res.json({ success: true, data: { totals, outstanding, monthly, byStatus, byCategory } });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

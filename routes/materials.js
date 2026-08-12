@@ -18,20 +18,21 @@ const upload = makeUpload({
 router.post('/upload', requireAdmin, upload.single('document'), async (req, res) => {
   const { title, description, category, course_id, program_id, subject } = req.body;
   const filePath = fileUrl(req.file);
-
+  let connection;
   try {
     if (!title || !filePath) return res.status(400).json({ error: 'Title and document are required' });
 
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       'INSERT INTO study_materials (title, description, category, course_id, program_id, subject, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [title, description || null, category || null, course_id || null, program_id || null, subject || null, filePath]
     );
-    connection.release();
 
     res.json({ success: true, message: 'Study material uploaded successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Upload failed', details: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -52,36 +53,40 @@ router.get('/', async (req, res) => {
   const where = ['AND m.course_id IS NULL AND m.program_id IS NULL'];
   const params = [];
   if (subject) { where.push('AND m.subject = ?'); params.push(subject); }
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [materials] = await connection.query(materialsQuery(where.join(' ')), params);
-    connection.release();
     res.json({ success: true, materials });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // ADMIN: GET ALL STUDY MATERIALS (including disabled), with course/program titles
 router.get('/all', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [materials] = await connection.query(materialsQuery('', false));
-    connection.release();
     res.json({ success: true, materials });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // ADMIN: TOGGLE ACTIVE / UPDATE METADATA
 router.put('/:id', requireAdmin, async (req, res) => {
   const { title, description, category, is_active, course_id, program_id, subject } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[existing]] = await connection.query('SELECT * FROM study_materials WHERE id = ?', [req.params.id]);
     if (!existing) {
-      connection.release();
       return res.status(404).json({ error: 'Material not found' });
     }
     await connection.query(
@@ -97,22 +102,25 @@ router.put('/:id', requireAdmin, async (req, res) => {
         req.params.id,
       ]
     );
-    connection.release();
     res.json({ success: true, message: 'Study material updated' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // ADMIN: DELETE STUDY MATERIAL
 router.delete('/:id', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('DELETE FROM study_materials WHERE id = ?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Study material deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

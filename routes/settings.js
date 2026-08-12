@@ -15,17 +15,19 @@ const qrUpload = makeUpload({
 router.post('/upload-qr', qrUpload.single('qr'), async (req, res) => {
   const url = fileUrl(req.file);
   if (!url) return res.status(400).json({ error: 'QR image file is required.' });
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO settings (setting_key, setting_value) VALUES ('payment_upi_qr_url', ?)
        ON DUPLICATE KEY UPDATE setting_value = ?`,
       [url, url]
     );
-    connection.release();
     res.json({ success: true, url });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

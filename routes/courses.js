@@ -21,58 +21,66 @@ router.post('/upload-content', requireAdmin, pdfUpload.single('pdf'), async (req
 
 // GET ALL COURSES
 router.get('/', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [courses] = await connection.query('SELECT * FROM courses ORDER BY created_at DESC');
-    connection.release();
     res.json({ success: true, courses });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // CREATE NEW COURSE
 router.post('/', requireAdmin, async (req, res) => {
   const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO courses (title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [title, category, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status || 'draft']
     );
-    connection.release();
     res.json({ success: true, message: 'Course created successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // UPDATE COURSE
 router.put('/:id', requireAdmin, async (req, res) => {
   const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `UPDATE courses SET title=?, category=?, subject=?, description=?, content_pdf=?, duration_weeks=?, price=?, min_payment=?, language=?, level=?, status=? WHERE id=?`,
       [title, category, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status, req.params.id]
     );
-    connection.release();
     res.json({ success: true, message: 'Course updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // DELETE COURSE
 router.delete('/:id', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('DELETE FROM courses WHERE id=?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Course deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

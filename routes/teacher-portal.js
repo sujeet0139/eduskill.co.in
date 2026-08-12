@@ -8,23 +8,26 @@ router.use(requireTeacher);
 
 // Dropdown/selection data for composing an assignment.
 router.get('/meta', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [courses] = await connection.query('SELECT id, title FROM courses ORDER BY title');
     const [programs] = await connection.query('SELECT id, title FROM programs ORDER BY title');
     const [batches] = await connection.query('SELECT id, name, course_id, program_id FROM batches ORDER BY name');
     const [students] = await connection.query('SELECT id, name, reference_no FROM students ORDER BY name');
-    connection.release();
     res.json({ success: true, courses, programs, batches, students });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // Assignments THIS teacher created.
 router.get('/assignments', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [assignments] = await connection.query(`
       SELECT a.*, c.title AS course_title, p.title AS program_title, b.name AS batch_name,
         (SELECT COUNT(*) FROM assignment_submissions WHERE assignment_id = a.id) AS total_submissions,
@@ -36,10 +39,11 @@ router.get('/assignments', async (req, res) => {
       WHERE a.created_by = ? AND a.created_by_role = 'teacher'
       ORDER BY a.created_at DESC
     `, [req.teacher.email]);
-    connection.release();
     res.json({ success: true, assignments });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -63,11 +67,11 @@ router.post('/assignments', async (req, res) => {
       const params = student_ids.flatMap((sid) => [assignmentId, sid]);
       await connection.query(`INSERT INTO assignment_targets (assignment_id, student_id) VALUES ${values}`, params);
     }
-    connection.release();
     res.json({ success: true, message: 'Assignment created and shared.', id: assignmentId });
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -81,10 +85,10 @@ async function ownsAssignment(connection, assignmentId, email) {
 
 // Submissions for one of the teacher's assignments.
 router.get('/assignments/:id/submissions', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     if (!(await ownsAssignment(connection, req.params.id, req.teacher.email))) {
-      connection.release();
       return res.status(403).json({ error: 'Not your assignment.' });
     }
     const [submissions] = await connection.query(`
@@ -92,29 +96,31 @@ router.get('/assignments/:id/submissions', async (req, res) => {
       FROM assignment_submissions sub JOIN students s ON sub.student_id = s.id
       WHERE sub.assignment_id = ? ORDER BY sub.submitted_at DESC
     `, [req.params.id]);
-    connection.release();
     res.json({ success: true, submissions });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // Grade a submission for one of the teacher's assignments.
 router.put('/assignments/:id/submissions/:studentId/grade', async (req, res) => {
   const { marks, feedback, status } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     if (!(await ownsAssignment(connection, req.params.id, req.teacher.email))) {
-      connection.release();
       return res.status(403).json({ error: 'Not your assignment.' });
     }
     await connection.query(
       'UPDATE assignment_submissions SET marks=?, feedback=?, status=? WHERE assignment_id=? AND student_id=?',
       [marks ?? null, feedback || null, status || 'approved', req.params.id, req.params.studentId]);
-    connection.release();
     res.json({ success: true, message: 'Graded.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

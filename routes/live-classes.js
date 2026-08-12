@@ -22,9 +22,10 @@ const upload = makeUpload({
 // ==========================================
 router.get('/', async (req, res) => {
   const { status, mentor_id, college_id, startDate, endDate } = req.query;
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     let query = `
       SELECT lc.*, f.name as mentor_name, c.name as target_college, co.title as target_course,
              (SELECT COUNT(*) FROM class_attendance WHERE class_id = lc.id AND status = 'present') as present_count
@@ -45,11 +46,12 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY lc.scheduled_at DESC';
 
     const [classes] = await connection.query(query, params);
-    connection.release();
-    
+
     res.json({ success: true, classes });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -58,17 +60,19 @@ router.get('/', async (req, res) => {
 // ==========================================
 router.post('/', async (req, res) => {
   const { title, topic, mentor_id, course_id, college_id, scheduled_at, duration_minutes, meet_link, max_students, attendance_enabled } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO live_classes (title, topic, mentor_id, course_id, college_id, scheduled_at, duration_minutes, meet_link, max_students, attendance_enabled)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [title, topic, mentor_id || null, course_id || null, college_id || null, scheduled_at, duration_minutes || 60, meet_link, max_students || 100, attendance_enabled !== undefined ? attendance_enabled : true]
     );
-    connection.release();
     res.json({ success: true, message: 'Live class scheduled successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -77,16 +81,18 @@ router.post('/', async (req, res) => {
 // ==========================================
 router.put('/:id', async (req, res) => {
   const { title, topic, mentor_id, scheduled_at, duration_minutes, meet_link, status } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `UPDATE live_classes SET title=?, topic=?, mentor_id=?, scheduled_at=?, duration_minutes=?, meet_link=?, status=? WHERE id=?`,
       [title, topic, mentor_id || null, scheduled_at, duration_minutes, meet_link, status, req.params.id]
     );
-    connection.release();
     res.json({ success: true, message: 'Class details updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -94,8 +100,9 @@ router.put('/:id', async (req, res) => {
 // 4. ATTENDANCE REPORT (Student %)
 // ==========================================
 router.get('/attendance-report', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [report] = await connection.query(`
       SELECT s.id, s.name, s.reference_no, c.name as college_name,
              COUNT(ca.id) as total_classes_marked,
@@ -107,10 +114,11 @@ router.get('/attendance-report', async (req, res) => {
       GROUP BY s.id
       ORDER BY s.name ASC
     `);
-    connection.release();
     res.json({ success: true, report });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -118,8 +126,9 @@ router.get('/attendance-report', async (req, res) => {
 // 5. GET ATTENDANCE FOR SPECIFIC CLASS
 // ==========================================
 router.get('/:id/attendance', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [records] = await connection.query(`
       SELECT ca.*, s.name, s.reference_no, s.email, c.name as college_name
       FROM class_attendance ca
@@ -128,10 +137,11 @@ router.get('/:id/attendance', async (req, res) => {
       WHERE ca.class_id = ?
       ORDER BY s.name ASC
     `, [req.params.id]);
-    connection.release();
     res.json({ success: true, attendance: records });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -141,22 +151,24 @@ router.get('/:id/attendance', async (req, res) => {
 router.post('/:id/attendance', async (req, res) => {
   const classId = req.params.id;
   // Expected body: { attendance: [{ student_id: 1, status: 'present' }, { student_id: 2, status: 'absent' }] }
-  const { attendance } = req.body; 
+  const { attendance } = req.body;
+  let connection;
   try {
     if (!attendance || !Array.isArray(attendance)) return res.status(400).json({ error: 'Invalid attendance format' });
-    
-    const connection = await pool.getConnection();
+
+    connection = await pool.getConnection();
     for (const record of attendance) {
       await connection.query(
-        `INSERT INTO class_attendance (class_id, student_id, status) VALUES (?, ?, ?) 
+        `INSERT INTO class_attendance (class_id, student_id, status) VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE status = ?`,
         [classId, record.student_id, record.status, record.status]
       );
     }
-    connection.release();
     res.json({ success: true, message: 'Attendance marked successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -164,28 +176,30 @@ router.post('/:id/attendance', async (req, res) => {
 // 7. UPLOAD RECORDING & MATERIALS
 // ==========================================
 router.post('/:id/upload', upload.fields([{ name: 'recording', maxCount: 1 }, { name: 'materials', maxCount: 1 }]), async (req, res) => {
+  let connection;
   try {
     const updates = [];
     const params = [];
-    
+
     // Accommodate direct file uploads or simple URL strings
     if (req.files && req.files['recording']) { updates.push('recording_url = ?'); params.push(fileUrl(req.files['recording'][0])); }
     else if (req.body.recording_url) { updates.push('recording_url = ?'); params.push(req.body.recording_url); }
-    
+
     if (req.files && req.files['materials']) { updates.push('materials_url = ?'); params.push(fileUrl(req.files['materials'][0])); }
     else if (req.body.materials_url) { updates.push('materials_url = ?'); params.push(req.body.materials_url); }
 
     if (updates.length > 0) {
-      const connection = await pool.getConnection();
+      connection = await pool.getConnection();
       params.push(req.params.id);
       await connection.query(`UPDATE live_classes SET ${updates.join(', ')} WHERE id = ?`, params);
-      connection.release();
       res.json({ success: true, message: 'Class materials uploaded successfully' });
     } else {
       res.status(400).json({ error: 'No files or URLs provided' });
     }
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -194,13 +208,13 @@ router.post('/:id/upload', upload.fields([{ name: 'recording', maxCount: 1 }, { 
 // ==========================================
 router.post('/:id/notify-materials', async (req, res) => {
   const classId = req.params.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     // Get class details
     const [[classDetails]] = await connection.query('SELECT * FROM live_classes WHERE id = ?', [classId]);
     if (!classDetails) {
-      connection.release();
       return res.status(404).json({ error: 'Class not found' });
     }
 
@@ -218,7 +232,6 @@ router.post('/:id/notify-materials', async (req, res) => {
     }
 
     const [students] = await connection.query(studentQuery, studentParams);
-    connection.release();
 
     // Send email to each student
     for (const student of students) {
@@ -228,6 +241,8 @@ router.post('/:id/notify-materials', async (req, res) => {
     res.json({ success: true, message: `Notifications sent to ${students.length} students.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -236,15 +251,14 @@ router.post('/:id/notify-materials', async (req, res) => {
 // ==========================================
 router.post('/:id/notify-link', async (req, res) => {
   const classId = req.params.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[classDetails]] = await connection.query('SELECT * FROM live_classes WHERE id = ?', [classId]);
     if (!classDetails) {
-      connection.release();
       return res.status(404).json({ error: 'Class not found' });
     }
     if (!classDetails.meet_link) {
-      connection.release();
       return res.status(400).json({ error: 'This class has no meeting link yet.' });
     }
 
@@ -259,7 +273,6 @@ router.post('/:id/notify-link', async (req, res) => {
       studentParams.push(classDetails.course_id);
     }
     const [students] = await connection.query(studentQuery, studentParams);
-    connection.release();
 
     for (const student of students) {
       await sendClassReminderEmail(student.email, student.name, classDetails);
@@ -267,6 +280,8 @@ router.post('/:id/notify-link', async (req, res) => {
     res.json({ success: true, message: `Meeting link emailed to ${students.length} students.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -277,29 +292,33 @@ router.post('/:id/notify-link', async (req, res) => {
 // Student submits feedback (this would be on a student-auth route)
 router.post('/:id/feedback', async (req, res) => {
   const { student_id, rating, comment } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       `INSERT INTO class_feedback (class_id, student_id, rating, comment) VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE rating = ?, comment = ?`,
       [req.params.id, student_id, rating, comment, rating, comment]
     );
-    connection.release();
     res.json({ success: true, message: 'Thank you for your feedback!' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // Admin views feedback for a class
 router.get('/:id/feedback', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [feedback] = await connection.query('SELECT cf.*, s.name as student_name FROM class_feedback cf JOIN students s ON cf.student_id = s.id WHERE cf.class_id = ?', [req.params.id]);
-    connection.release();
     res.json({ success: true, feedback });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

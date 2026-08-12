@@ -14,13 +14,15 @@ const upload = makeUpload({
 
 // GET all slides (for admin panel)
 router.get('/', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [slides] = await connection.query('SELECT * FROM hero_slides ORDER BY order_no ASC, id ASC');
-    connection.release();
     res.json({ success: true, slides });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -33,17 +35,19 @@ router.post('/', upload.single('image'), async (req, res) => {
     return res.status(400).json({ error: 'Image file is required.' });
   }
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
-      `INSERT INTO hero_slides (image_url, alt_text, title, subtitle, cta_text, cta_link, is_active, order_no) 
+      `INSERT INTO hero_slides (image_url, alt_text, title, subtitle, cta_text, cta_link, is_active, order_no)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [imageUrl, alt_text, title, subtitle, cta_text, cta_link, is_active === 'true', order_no || 0]
     );
-    connection.release();
     res.status(201).json({ success: true, message: 'Slide created successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -52,8 +56,9 @@ router.put('/:id', upload.single('image'), async (req, res) => {
   const { alt_text, title, subtitle, cta_text, cta_link, is_active, order_no } = req.body;
   const newImageUrl = fileUrl(req.file);
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     // If a new image is uploaded, include it in the update.
     // Otherwise, keep the existing image.
@@ -71,24 +76,27 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 
     await connection.query(query, params);
 
-    connection.release();
     res.json({ success: true, message: 'Slide updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // DELETE a slide
 router.delete('/:id', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     // Note: This doesn't delete the image from Cloudinary/disk, only the DB record.
     // A more robust implementation would also delete the file from storage.
     await connection.query('DELETE FROM hero_slides WHERE id=?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Slide deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
