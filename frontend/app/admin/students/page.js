@@ -94,11 +94,15 @@ export default function AdminStudents() {
   const [addSaving, setAddSaving] = useState(false);
   const [addResult, setAddResult] = useState(null);
 
-  // Import modal state
+  // Import modal state — two-phase: validate (no writes) shows every row's
+  // errors, then Confirm actually commits. "Validate every row before
+  // committing any" (item #24) is a real guarantee this way, not just a
+  // client-side promise.
   const [importing, setImporting] = useState(false);
   const [importRows, setImportRows] = useState([]);
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [importValidation, setImportValidation] = useState(null); // { totalRows, validCount, errors }
 
   // Password modal state
   const [pwStudent, setPwStudent] = useState(null);
@@ -265,6 +269,9 @@ export default function AdminStudents() {
   };
 
   // ---- Import ----
+  const downloadTemplate = () => {
+    window.open(`${api.base}/api/students/import-template`, "_blank");
+  };
   const onCsvFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -279,18 +286,36 @@ export default function AdminStudents() {
         current_year: r.current_year || r.year || 1,
         college_id: r.college_id || r.collegeid || "",
         department: r.department || "",
+        dob: r.dob || "",
       }));
       setImportRows(mapped);
       setImportResult(null);
+      setImportValidation(null);
     };
     reader.readAsText(file);
   };
+  // Phase 1 — validate only, no writes. Must run (and be reviewed) before
+  // Confirm Import becomes clickable.
+  const runValidation = async () => {
+    if (!importRows.length) return;
+    setImportBusy(true);
+    try {
+      const res = await api.post("/api/students/bulk-import/validate", { students: importRows }, token(), { timeoutMs: 60000 });
+      setImportValidation(res);
+    } catch (err) {
+      setImportValidation({ error: err.message });
+    } finally {
+      setImportBusy(false);
+    }
+  };
+  // Phase 2 — actually commits (server re-validates regardless).
   const submitImport = async () => {
     if (!importRows.length) return;
     setImportBusy(true);
     try {
       const res = await api.post("/api/students/bulk-import", { students: importRows }, token(), { timeoutMs: 60000 });
       setImportResult(res);
+      setImportValidation(null);
       load();
     } catch (err) {
       setImportResult({ error: err.message });
@@ -330,7 +355,7 @@ export default function AdminStudents() {
               className="rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
             />
             <Button onClick={openAdd} className="whitespace-nowrap">+ Add Student</Button>
-            <Button onClick={() => { setImporting(true); setImportRows([]); setImportResult(null); }} className="whitespace-nowrap">Import CSV</Button>
+            <Button onClick={() => { setImporting(true); setImportRows([]); setImportResult(null); setImportValidation(null); }} className="whitespace-nowrap">Import CSV</Button>
             <Button onClick={exportStudents} loading={exporting} className="whitespace-nowrap">Export CSV</Button>
           </div>
         }
@@ -563,7 +588,8 @@ export default function AdminStudents() {
         </div>
       )}
 
-      {/* IMPORT CSV MODAL */}
+      {/* IMPORT CSV MODAL — two-phase: Validate (no writes) must run and be
+          reviewed before Confirm Import becomes clickable (item #24). */}
       {importing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setImporting(false)}>
           <div className="my-8 w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -571,9 +597,14 @@ export default function AdminStudents() {
               <h2 className="text-lg font-bold text-gray-900">Import Students (CSV)</h2>
               <button onClick={() => setImporting(false)} className="text-gray-400 hover:text-gray-700">✕</button>
             </div>
-            <p className="mb-3 text-xs text-gray-500">
-              CSV header row should include: <span className="font-mono">name, email, phone, roll_number, current_year, college_id, department</span>.
-            </p>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-gray-500">
+                Columns: <span className="font-mono">name, email, phone, roll_number, current_year, college_id, department, dob</span>
+              </p>
+              <button type="button" onClick={downloadTemplate} className="whitespace-nowrap text-xs font-medium text-brand hover:underline">
+                Download Sample Sheet
+              </button>
+            </div>
             <input type="file" accept=".csv,text/csv" onChange={(e) => onCsvFile(e.target.files?.[0])}
               className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-3 file:py-2 file:text-white" />
             {importRows.length > 0 && (
@@ -582,19 +613,50 @@ export default function AdminStudents() {
             {importRows.slice(0, 3).map((r, i) => (
               <div key={i} className="mt-1 rounded bg-gray-50 p-2 text-xs text-gray-600">{r.name} — {r.email} — {r.phone}</div>
             ))}
+
+            {importValidation && !importValidation.error && (
+              <div className="mt-3 rounded-lg border border-gray-100 p-3">
+                <p className="text-sm font-medium text-gray-800">
+                  {importValidation.validCount} of {importValidation.totalRows} rows are valid.
+                  {importValidation.errors.length > 0 && ` ${importValidation.errors.length} row(s) have problems and will be skipped:`}
+                </p>
+                {importValidation.errors.length > 0 && (
+                  <div className="mt-2 max-h-40 overflow-y-auto text-xs text-red-600">
+                    {importValidation.errors.map((e, i) => (
+                      <div key={i}>
+                        Row {e.row ?? "?"} ({e.email || "no email"}): {e.errors.map((x) => `${x.field ? x.field + " — " : ""}${x.reason}`).join("; ")}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {importValidation?.error && <div className="mt-3"><Alert type="error">{importValidation.error}</Alert></div>}
+
             {importResult && (
               <div className="mt-3">
                 {importResult.error ? <Alert type="error">{importResult.error}</Alert> : <Alert type="success">{importResult.message}</Alert>}
                 {importResult.errors && (
                   <div className="mt-2 max-h-32 overflow-y-auto text-xs text-red-600">
-                    {importResult.errors.map((e, i) => <div key={i}>{e.email}: {e.error}</div>)}
+                    {importResult.errors.map((e, i) => (
+                      <div key={i}>Row {e.row ?? "?"} ({e.email || "no email"}): {e.errors.map((x) => x.reason).join("; ")}</div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
+
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setImporting(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
-              <Button onClick={submitImport} loading={importBusy} disabled={!importRows.length}>Import {importRows.length || ""}</Button>
+              <Button onClick={runValidation} loading={importBusy} disabled={!importRows.length} className="bg-gray-600 hover:bg-gray-700">Validate</Button>
+              <Button
+                onClick={submitImport}
+                loading={importBusy}
+                disabled={!importRows.length || !importValidation || importValidation.error || importValidation.validCount === 0}
+                title={!importValidation ? "Run Validate first" : ""}
+              >
+                Confirm Import {importValidation?.validCount ? `(${importValidation.validCount})` : ""}
+              </Button>
             </div>
           </div>
         </div>

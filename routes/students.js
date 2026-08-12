@@ -615,7 +615,104 @@ router.post('/bulk-verify', requireAdmin, async (req, res) => {
   }
 });
 
-// BULK IMPORT STUDENTS (CSV/JSON Array)
+// BULK IMPORT — sample sheet template (item #24's "Download Sample Sheet").
+router.get('/import-template', requireAdmin, (req, res) => {
+  const header = 'name,email,phone,roll_number,current_year,college_id,department,dob';
+  const example = 'Ravi Kumar,ravi.kumar@example.com,9876543210,BCA/2024/001,1,1,Computer Science,2005-06-15';
+  const csv = `${header}\n${example}\n`;
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="eduskill-student-import-template.csv"');
+  res.send(csv);
+});
+
+// Shared validation for both the dry-run and the actual import below, so
+// "validate every row before committing any" (item #24) is a real guarantee
+// and not two copies of the rules drifting apart. NAME_RE/DOB range are new
+// checks the old bulk-import never had; MOBILE/EMAIL reuse the same rules as
+// the rest of the app.
+const NAME_RE = /^[A-Za-z\s.'-]+$/;
+async function validateBulkRows(connection, rows) {
+  const [existingEmailRows] = await connection.query('SELECT email FROM students');
+  const [existingPhoneRows] = await connection.query('SELECT phone FROM students WHERE phone IS NOT NULL');
+  const [collegeRows] = await connection.query('SELECT id FROM colleges');
+  const existingEmails = new Set(existingEmailRows.map((r) => r.email.toLowerCase()));
+  const existingPhones = new Set(existingPhoneRows.map((r) => r.phone));
+  const validCollegeIds = new Set(collegeRows.map((r) => String(r.id)));
+
+  const seenEmails = new Set();
+  const seenPhones = new Set();
+  const errors = [];
+  const validRows = [];
+
+  rows.forEach((st, i) => {
+    const rowNum = i + 2; // header is row 1, so first data row is 2 (matches what a spreadsheet shows)
+    const rowErrors = [];
+
+    if (!st.name || !String(st.name).trim()) rowErrors.push({ field: 'name', reason: 'Name is required.' });
+    else if (!NAME_RE.test(String(st.name).trim())) rowErrors.push({ field: 'name', reason: 'Name must not contain numbers or special characters.' });
+
+    if (!st.email) rowErrors.push({ field: 'email', reason: 'Email is required.' });
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(st.email)) rowErrors.push({ field: 'email', reason: 'Invalid email format.' });
+    else {
+      const lower = String(st.email).toLowerCase();
+      if (existingEmails.has(lower)) rowErrors.push({ field: 'email', reason: 'Already registered.' });
+      else if (seenEmails.has(lower)) rowErrors.push({ field: 'email', reason: 'Duplicate email within this file.' });
+      else seenEmails.add(lower);
+    }
+
+    let normPhone = null;
+    if (st.phone) {
+      normPhone = normalizeMobile(st.phone);
+      if (!isValidMobile(normPhone)) rowErrors.push({ field: 'phone', reason: 'Must be exactly 10 digits, numeric only.' });
+      else if (existingPhones.has(normPhone)) rowErrors.push({ field: 'phone', reason: 'Already registered.' });
+      else if (seenPhones.has(normPhone)) rowErrors.push({ field: 'phone', reason: 'Duplicate mobile number within this file.' });
+      else seenPhones.add(normPhone);
+    }
+
+    if (st.college_id && !validCollegeIds.has(String(st.college_id))) {
+      rowErrors.push({ field: 'college_id', reason: `No college with ID ${st.college_id} exists.` });
+    }
+
+    if (st.dob) {
+      const d = new Date(st.dob);
+      const ageYears = (Date.now() - d.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+      if (isNaN(d.getTime())) rowErrors.push({ field: 'dob', reason: 'Not a valid date.' });
+      else if (ageYears < 10 || ageYears > 100) rowErrors.push({ field: 'dob', reason: 'Date of birth gives an implausible age.' });
+    }
+
+    if (rowErrors.length) {
+      errors.push({ row: rowNum, email: st.email, errors: rowErrors });
+    } else {
+      validRows.push({ ...st, phone: normPhone });
+    }
+  });
+
+  return { errors, validRows };
+}
+
+// VALIDATE ONLY -- no writes. Returns the full per-row error report so the
+// admin sees every problem before anything is committed (item #24).
+router.post('/bulk-import/validate', requireAdmin, async (req, res) => {
+  const { students } = req.body;
+  if (!students || !Array.isArray(students)) {
+    return res.status(400).json({ error: 'Invalid payload. Expected an array of student objects.' });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const { errors, validRows } = await validateBulkRows(connection, students);
+    res.json({ success: true, totalRows: students.length, validCount: validRows.length, errors });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// BULK IMPORT STUDENTS (CSV/JSON Array) -- re-validates (rows can't have
+// changed since the client's last /validate call, but never trust that) and
+// imports only the rows that pass; every skipped row is reported, never
+// silently auto-fixed.
 router.post('/bulk-import', requireAdmin, async (req, res) => {
   const { students } = req.body; // Expects array of objects
 
@@ -626,26 +723,27 @@ router.post('/bulk-import', requireAdmin, async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
-    let imported = 0;
-    let errors = [];
+    const { errors, validRows } = await validateBulkRows(connection, students);
 
-    for (const st of students) {
+    let imported = 0;
+    for (const st of validRows) {
       const ref = 'SKC' + Date.now() + Math.floor(Math.random() * 1000);
       try {
-        const fmtErr = validateStudentFields(st);
-        if (fmtErr) { errors.push({ email: st.email, error: fmtErr }); continue; }
-        if (st.phone) st.phone = normalizeMobile(st.phone);
         await connection.query(
-          `INSERT INTO students (reference_no, name, email, phone, roll_number, current_year, college_id, department)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [ref, st.name, st.email, st.phone, st.roll_number || null, st.current_year || 1, st.college_id, st.department || null]
+          `INSERT INTO students (reference_no, name, email, phone, roll_number, current_year, college_id, department, dob)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [ref, st.name, st.email, st.phone, st.roll_number || null, st.current_year || 1, st.college_id || null, st.department || null, st.dob || null]
         );
         imported++;
       } catch (err) {
-        errors.push({ email: st.email, error: err.message });
+        errors.push({ row: null, email: st.email, errors: [{ field: null, reason: err.message }] });
       }
     }
-    res.json({ success: true, message: `Successfully imported ${imported} students`, errors: errors.length > 0 ? errors : undefined });
+    res.json({
+      success: true,
+      message: `Successfully imported ${imported} of ${students.length} students`,
+      errors: errors.length > 0 ? errors : undefined,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
