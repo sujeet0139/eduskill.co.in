@@ -50,6 +50,7 @@ const NAV_GROUPS = [
     title: "Site & Content",
     items: [
       { href: "/admin/hero-slides", label: "Hero Banner", icon: ImageIcon },
+      { href: "/admin/campaigns", label: "Campaign Links", icon: Link2 },
       { href: "/admin/announcements", label: "Announcements", icon: Megaphone },
       { href: "/admin/communications", label: "Communications", icon: MessageSquare },
     ],
