@@ -99,7 +99,7 @@ router.post('/', requireAdmin, async (req, res) => {
   const {
     slug, name, college_id, program_id, course_id, batch_id,
     hero_tag, headline, subheading, feedback_enabled, counselor_toggle_enabled,
-    confirmation_template, starts_at, ends_at, status,
+    confirmation_template, group_link, starts_at, ends_at, status,
     benefits, interests,
   } = req.body;
 
@@ -119,12 +119,12 @@ router.post('/', requireAdmin, async (req, res) => {
 
     const [result] = await connection.query(
       `INSERT INTO campaigns (slug, name, college_id, program_id, course_id, batch_id, hero_tag, headline, subheading,
-        feedback_enabled, counselor_toggle_enabled, confirmation_template, starts_at, ends_at, status, created_by_admin_id, created_by_email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        feedback_enabled, counselor_toggle_enabled, confirmation_template, group_link, starts_at, ends_at, status, created_by_admin_id, created_by_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [slug, name, college_id || null, program_id || null, course_id || null, batch_id || null,
        hero_tag || null, headline || null, subheading || null,
        feedback_enabled !== false, counselor_toggle_enabled !== false,
-       confirmation_template || DEFAULT_CONFIRMATION_TEMPLATE,
+       confirmation_template || DEFAULT_CONFIRMATION_TEMPLATE, group_link || null,
        starts_at || null, ends_at || null, status || 'active',
        req.admin && req.admin.id, req.admin && req.admin.email]
     );
@@ -172,7 +172,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   const {
     name, college_id, program_id, course_id, batch_id,
     hero_tag, headline, subheading, feedback_enabled, counselor_toggle_enabled,
-    confirmation_template, starts_at, ends_at, status,
+    confirmation_template, group_link, starts_at, ends_at, status,
     benefits, interests,
   } = req.body;
   // slug is intentionally never accepted here -- see the comment above POST /.
@@ -181,11 +181,11 @@ router.put('/:id', requireAdmin, async (req, res) => {
     connection = await pool.getConnection();
     await connection.query(
       `UPDATE campaigns SET name=?, college_id=?, program_id=?, course_id=?, batch_id=?, hero_tag=?, headline=?, subheading=?,
-        feedback_enabled=?, counselor_toggle_enabled=?, confirmation_template=?, starts_at=?, ends_at=?, status=? WHERE id=?`,
+        feedback_enabled=?, counselor_toggle_enabled=?, confirmation_template=?, group_link=?, starts_at=?, ends_at=?, status=? WHERE id=?`,
       [name, college_id || null, program_id || null, course_id || null, batch_id || null,
        hero_tag || null, headline || null, subheading || null,
        feedback_enabled !== false, counselor_toggle_enabled !== false,
-       confirmation_template || DEFAULT_CONFIRMATION_TEMPLATE,
+       confirmation_template || DEFAULT_CONFIRMATION_TEMPLATE, group_link || null,
        starts_at || null, ends_at || null, status || 'active', req.params.id]
     );
     if (Array.isArray(benefits)) await replaceBenefits(connection, req.params.id, benefits);
@@ -230,11 +230,11 @@ router.post('/:id/clone', requireAdmin, async (req, res) => {
 
     const [result] = await connection.query(
       `INSERT INTO campaigns (slug, name, college_id, program_id, course_id, batch_id, hero_tag, headline, subheading,
-        feedback_enabled, counselor_toggle_enabled, confirmation_template, status, created_by_admin_id, created_by_email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        feedback_enabled, counselor_toggle_enabled, confirmation_template, group_link, status, created_by_admin_id, created_by_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
       [slug, name, source.college_id, source.program_id, source.course_id, source.batch_id,
        source.hero_tag, source.headline, source.subheading,
-       source.feedback_enabled, source.counselor_toggle_enabled, source.confirmation_template,
+       source.feedback_enabled, source.counselor_toggle_enabled, source.confirmation_template, source.group_link,
        req.admin && req.admin.id, req.admin && req.admin.email]
     );
     const newId = result.insertId;

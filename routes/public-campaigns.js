@@ -54,6 +54,7 @@ router.get('/:slug', async (req, res) => {
         id: campaign.id, slug: campaign.slug, name: campaign.name,
         hero_tag: campaign.hero_tag, headline: campaign.headline, subheading: campaign.subheading,
         feedback_enabled: !!campaign.feedback_enabled, counselor_toggle_enabled: !!campaign.counselor_toggle_enabled,
+        confirmation_template: campaign.confirmation_template, group_link: campaign.group_link,
         college_name: campaign.college_name, program_title: campaign.program_title,
         course_title: campaign.course_title, batch_name: campaign.batch_name,
         batch_start_date: campaign.batch_start_date,

@@ -915,6 +915,7 @@ async function checkDatabase() {
         feedback_enabled BOOLEAN DEFAULT TRUE,
         counselor_toggle_enabled BOOLEAN DEFAULT TRUE,
         confirmation_template TEXT,
+        group_link VARCHAR(255),
         starts_at DATETIME,
         ends_at DATETIME,
         status ENUM('active', 'paused') DEFAULT 'active',
