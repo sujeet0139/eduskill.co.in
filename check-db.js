@@ -268,6 +268,21 @@ async function checkDatabase() {
       )
     `);
 
+    // Mapping history/audit log (item #26) -- every map/demap of a student
+    // to a course or program, who did it, and when.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS mapping_audit_log (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        student_id INT NOT NULL,
+        item_type ENUM('course', 'program') NOT NULL,
+        item_id INT NOT NULL,
+        action ENUM('mapped', 'demapped') NOT NULL,
+        admin_id INT,
+        admin_email VARCHAR(150),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Access log for restricted fields (item #12's Aadhaar note: "mark as a
     // restricted field with access logging, not a plain text column"). Every
     // time an admin's full-profile view returns a student's Aadhaar number,

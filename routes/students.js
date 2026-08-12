@@ -871,6 +871,13 @@ router.post('/:id/enroll', requireAdmin, async (req, res) => {
       if (oldBatch) await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [oldBatch]);
       if (newBatch) await connection.query('UPDATE batches SET current_enrolled = current_enrolled + 1 WHERE id = ?', [newBatch]);
     }
+
+    // Mapping history/audit log (item #26) -- who mapped whom, to what, when.
+    await connection.query(
+      'INSERT INTO mapping_audit_log (student_id, item_type, item_id, action, admin_id, admin_email) VALUES (?, ?, ?, "mapped", ?, ?)',
+      [req.params.id, type, item_id, req.admin && req.admin.id, req.admin && req.admin.email]
+    );
+
     res.json({ success: true, message: existing ? 'Enrollment updated.' : 'Student enrolled.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -896,7 +903,85 @@ router.delete('/:id/enroll', requireAdmin, async (req, res) => {
     if (existing && existing.batch_id) {
       await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [existing.batch_id]);
     }
+
+    await connection.query(
+      'INSERT INTO mapping_audit_log (student_id, item_type, item_id, action, admin_id, admin_email) VALUES (?, ?, ?, "demapped", ?, ?)',
+      [req.params.id, type, item_id, req.admin && req.admin.id, req.admin && req.admin.email]
+    );
+
     res.json({ success: true, message: 'Student unenrolled.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// ADMIN: BULK MAP -- select multiple students, map all to one course/program
+// in one action (item #26). Same idempotent insert-or-update logic as the
+// single /:id/enroll route, looped, with the same audit logging.
+router.post('/bulk-map', requireAdmin, async (req, res) => {
+  const { studentIds, type, item_id, batch_id, status } = req.body;
+  if (!Array.isArray(studentIds) || !studentIds.length) {
+    return res.status(400).json({ error: 'studentIds (non-empty array) is required.' });
+  }
+  if (!['course', 'program'].includes(type) || !item_id) {
+    return res.status(400).json({ error: 'type (course|program) and item_id are required.' });
+  }
+  const table = type === 'course' ? 'student_courses' : 'student_programs';
+  const fk = type === 'course' ? 'course_id' : 'program_id';
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    let mapped = 0;
+    const errors = [];
+    for (const studentId of studentIds) {
+      try {
+        const [[existing]] = await connection.query(`SELECT batch_id FROM ${table} WHERE student_id = ? AND ${fk} = ?`, [studentId, item_id]);
+        await connection.query(
+          `INSERT INTO ${table} (student_id, ${fk}, batch_id, status) VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE batch_id = VALUES(batch_id), status = VALUES(status)`,
+          [studentId, item_id, batch_id || null, status || 'enrolled']
+        );
+        const oldBatch = existing ? existing.batch_id : null;
+        const newBatch = batch_id || null;
+        if (String(oldBatch) !== String(newBatch)) {
+          if (oldBatch) await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [oldBatch]);
+          if (newBatch) await connection.query('UPDATE batches SET current_enrolled = current_enrolled + 1 WHERE id = ?', [newBatch]);
+        }
+        await connection.query(
+          'INSERT INTO mapping_audit_log (student_id, item_type, item_id, action, admin_id, admin_email) VALUES (?, ?, ?, "mapped", ?, ?)',
+          [studentId, type, item_id, req.admin && req.admin.id, req.admin && req.admin.email]
+        );
+        mapped++;
+      } catch (err) {
+        errors.push({ studentId, error: err.message });
+      }
+    }
+    res.json({ success: true, message: `Mapped ${mapped} of ${studentIds.length} students.`, errors: errors.length ? errors : undefined });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// ADMIN: MAPPING HISTORY -- backs the dedicated mapping screen's audit view.
+router.get('/mapping-audit-log', requireAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [rows] = await connection.query(`
+      SELECT l.*, s.name AS student_name, s.reference_no,
+             CASE l.item_type WHEN 'course' THEN c.title WHEN 'program' THEN p.title END AS item_title
+      FROM mapping_audit_log l
+      LEFT JOIN students s ON s.id = l.student_id
+      LEFT JOIN courses c ON l.item_type = 'course' AND c.id = l.item_id
+      LEFT JOIN programs p ON l.item_type = 'program' AND p.id = l.item_id
+      ORDER BY l.created_at DESC
+      LIMIT 200
+    `);
+    res.json({ success: true, log: rows });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
