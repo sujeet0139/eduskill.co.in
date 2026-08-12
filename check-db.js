@@ -390,6 +390,8 @@ async function checkDatabase() {
     await runAlterIfMissing('courses', 'min_payment', "ALTER TABLE courses ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER price");
     await runAlterIfMissing('courses', 'content_pdf', "ALTER TABLE courses ADD COLUMN content_pdf VARCHAR(255) AFTER description");
     await runAlterIfMissing('courses', 'subject', "ALTER TABLE courses ADD COLUMN subject VARCHAR(150) AFTER category");
+    // Item #25 -- courses had a content_pdf but no thumbnail/banner image at all.
+    await runAlterIfMissing('courses', 'image_url', "ALTER TABLE courses ADD COLUMN image_url VARCHAR(500) AFTER content_pdf");
     await runAlterIfMissing('programs', 'min_payment', "ALTER TABLE programs ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER fee");
 
     // 7A. BATCHES TABLE (For Courses & Programs)

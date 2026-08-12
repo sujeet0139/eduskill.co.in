@@ -6,6 +6,7 @@ import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, Alert } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
 import { StateDistrictSelect } from "@/components/StateDistrictSelect";
+import { ImageUploadField } from "@/components/ImageUploadField";
 import { useToast } from "@/components/Toast";
 
 const EMPTY = {
@@ -31,7 +32,6 @@ export default function AdminColleges() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
-  const [logoUploading, setLogoUploading] = useState(false);
 
   // HOD management for the college currently being edited
   const [hods, setHods] = useState([]);
@@ -71,17 +71,6 @@ export default function AdminColleges() {
     try { await api.del(`/api/colleges/${id}`, token()); load(); } catch (e) { notify.error(e.message); }
   };
 
-  const uploadLogo = async (file) => {
-    if (!file) return;
-    setLogoUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("logo", file);
-      const res = await api.postForm("/api/colleges/upload-logo", fd, token());
-      setForm((f) => ({ ...f, logo_url: res.url }));
-    } catch (err) { notify.error(err.message); }
-    finally { setLogoUploading(false); }
-  };
 
   const addHod = async () => {
     if (!editId || !newHod.name) return;
@@ -172,13 +161,14 @@ export default function AdminColleges() {
           <textarea name="principal_details" value={form.principal_details} onChange={change} placeholder="Additional principal / admin notes (optional)"
             className="w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" rows={2} />
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">College Logo</label>
-            <input type="file" accept="image/*" disabled={logoUploading} onChange={(e) => uploadLogo(e.target.files?.[0])}
-              className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-3 file:py-2 file:text-white" />
-            {logoUploading && <p className="mt-1 text-xs text-gray-500">Uploading…</p>}
-            {form.logo_url && <img src={api.mediaUrl(form.logo_url)} alt="Logo" className="mt-2 h-16 w-16 rounded border object-contain p-1" />}
-          </div>
+          <ImageUploadField
+            label="College Logo"
+            previewUrl={form.logo_url}
+            uploadUrl="/api/colleges/upload-logo"
+            fieldName="logo"
+            token={token()}
+            onUploaded={(url) => setForm((f) => ({ ...f, logo_url: url }))}
+          />
 
           {/* HOD Details -- "support multiple" (item #23). Only usable once the
               college exists, since HODs are stored against a college_id. */}

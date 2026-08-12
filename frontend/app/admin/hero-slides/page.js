@@ -6,6 +6,7 @@ import { adminAuth } from "@/lib/auth";
 import { Button, Input, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
 import { useToast } from "@/components/Toast";
+import { ImageUploadField } from "@/components/ImageUploadField";
 
 const EMPTY = { title: "", subtitle: "", alt_text: "", cta_text: "", cta_link: "", order_no: 0, is_active: true };
 
@@ -98,13 +99,14 @@ export default function AdminHeroSlides() {
             </label>
           </div>
           <Input label="Alt text (accessibility)" name="alt_text" value={form.alt_text} onChange={change} />
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Image {editId ? "(leave empty to keep current)" : "*"} — JPG/PNG/WebP, max 2 MB
-            </label>
-            <input type="file" accept=".jpg,.jpeg,.png,.webp" onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand file:px-4 file:py-2 file:text-white" />
-          </div>
+          <ImageUploadField
+            label={`Image ${editId ? "(leave empty to keep current)" : "*"}`}
+            previewUrl={editId ? form.image_url : null}
+            accept=".jpg,.jpeg,.png,.webp"
+            onFileSelected={setFile}
+            hint="JPG/PNG/WebP, max 2 MB."
+          />
+          {file && <p className="text-xs text-green-600">Selected: {file.name} — will upload on save.</p>}
           <Button type="submit" loading={saving} className="w-full">{editId ? "Update Slide" : "Create Slide"}</Button>
         </form>
       </Modal>

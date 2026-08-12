@@ -12,10 +12,25 @@ const pdfUpload = makeUpload({
   allowedMime: ['application/pdf'],
 });
 
+const imageUpload = makeUpload({
+  folder: 'eduskill/course-images',
+  prefix: 'course-img-',
+  maxSize: 3 * 1024 * 1024,
+  allowedExt: /jpeg|jpg|png|webp/,
+  allowedMime: ['image/jpeg', 'image/png', 'image/webp'],
+});
+
 // UPLOAD COURSE CONTENT PDF -> returns the public URL (admin pastes/saves it on the course)
 router.post('/upload-content', requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
   const url = fileUrl(req.file);
   if (!url) return res.status(400).json({ error: 'PDF file is required.' });
+  res.json({ success: true, url });
+});
+
+// UPLOAD COURSE THUMBNAIL/BANNER IMAGE -> returns the public URL (item #25)
+router.post('/upload-image', requireAdmin, imageUpload.single('image'), async (req, res) => {
+  const url = fileUrl(req.file);
+  if (!url) return res.status(400).json({ error: 'Image file is required.' });
   res.json({ success: true, url });
 });
 
@@ -35,14 +50,14 @@ router.get('/', async (req, res) => {
 
 // CREATE NEW COURSE
 router.post('/', requireAdmin, async (req, res) => {
-  const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status, track_id } = req.body;
+  const { title, category, subject, description, content_pdf, image_url, duration_weeks, price, min_payment, language, level, status, track_id } = req.body;
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.query(
-      `INSERT INTO courses (title, category, track_id, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, category, track_id || null, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status || 'draft']
+      `INSERT INTO courses (title, category, track_id, subject, description, content_pdf, image_url, duration_weeks, price, min_payment, language, level, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, category, track_id || null, subject || null, description, content_pdf || null, image_url || null, duration_weeks, price || 0, min_payment || 0, language, level, status || 'draft']
     );
     res.json({ success: true, message: 'Course created successfully' });
   } catch (error) {
@@ -54,13 +69,13 @@ router.post('/', requireAdmin, async (req, res) => {
 
 // UPDATE COURSE
 router.put('/:id', requireAdmin, async (req, res) => {
-  const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status, track_id } = req.body;
+  const { title, category, subject, description, content_pdf, image_url, duration_weeks, price, min_payment, language, level, status, track_id } = req.body;
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.query(
-      `UPDATE courses SET title=?, category=?, track_id=?, subject=?, description=?, content_pdf=?, duration_weeks=?, price=?, min_payment=?, language=?, level=?, status=? WHERE id=?`,
-      [title, category, track_id || null, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status, req.params.id]
+      `UPDATE courses SET title=?, category=?, track_id=?, subject=?, description=?, content_pdf=?, image_url=?, duration_weeks=?, price=?, min_payment=?, language=?, level=?, status=? WHERE id=?`,
+      [title, category, track_id || null, subject || null, description, content_pdf || null, image_url || null, duration_weeks, price || 0, min_payment || 0, language, level, status, req.params.id]
     );
     res.json({ success: true, message: 'Course updated successfully' });
   } catch (error) {

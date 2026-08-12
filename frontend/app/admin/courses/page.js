@@ -6,8 +6,9 @@ import { adminAuth } from "@/lib/auth";
 import { Button, Input, Select, StatusBadge } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
 import { useToast } from "@/components/Toast";
+import { ImageUploadField } from "@/components/ImageUploadField";
 
-const EMPTY = { title: "", category: "", subject: "", description: "", content_pdf: "", duration_weeks: "", price: "", min_payment: "", language: "English", level: "Beginner", status: "draft" };
+const EMPTY = { title: "", category: "", subject: "", description: "", content_pdf: "", image_url: "", duration_weeks: "", price: "", min_payment: "", language: "English", level: "Beginner", status: "draft" };
 
 export default function AdminCourses() {
   const [courses, setCourses] = useState([]);
@@ -97,6 +98,16 @@ export default function AdminCourses() {
           </div>
           <textarea name="description" value={form.description} onChange={change} placeholder="Description"
             className="w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" rows={3} />
+
+          <ImageUploadField
+            label="Course Thumbnail / Banner"
+            previewUrl={form.image_url}
+            uploadUrl="/api/courses/upload-image"
+            token={token()}
+            onUploaded={(url) => setForm((f) => ({ ...f, image_url: url }))}
+            hint="Shown on the course catalog / homepage."
+          />
+
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Content / Syllabus PDF</label>
             <Input name="content_pdf" value={form.content_pdf} onChange={change} placeholder="PDF URL (or upload below)" />
