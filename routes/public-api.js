@@ -35,19 +35,58 @@ router.get('/registration-form', async (req, res) => {
   }
 });
 
-// GET /api/public/colleges - Fetch all colleges for dropdowns + homepage list
+// GET /api/public/colleges - Fetch colleges for dropdowns + homepage list.
+// Optional ?districtId= narrows the list, for the State -> District ->
+// College cascade on the registration form (dev-prompt item #23).
 router.get('/colleges', async (req, res) => {
+  const { districtId } = req.query;
   let connection;
   try {
     connection = await pool.getConnection();
-    const [colleges] = await connection.query(
-      `SELECT c.id, c.name, d.name AS district
-       FROM colleges c LEFT JOIN districts d ON c.district_id = d.id
-       ORDER BY c.name ASC`
-    );
+    const params = [];
+    let query = `
+      SELECT c.id, c.name, d.name AS district
+      FROM colleges c LEFT JOIN districts d ON c.district_id = d.id
+      WHERE 1=1
+    `;
+    if (districtId) { query += ' AND c.district_id = ?'; params.push(districtId); }
+    query += ' ORDER BY c.name ASC';
+    const [colleges] = await connection.query(query, params);
     res.json({ success: true, colleges });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch colleges', details: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// GET /api/public/states - distinct states with a district, for the
+// State -> District cascade (item #23). Read-only, no PII, safe public.
+router.get('/states', async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [rows] = await connection.query('SELECT DISTINCT state FROM districts ORDER BY state ASC');
+    res.json({ success: true, states: rows.map((r) => r.state) });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch states', details: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// GET /api/public/districts - optionally filtered by ?state=
+router.get('/districts', async (req, res) => {
+  const { state } = req.query;
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [districts] = state
+      ? await connection.query('SELECT id, name, state FROM districts WHERE state = ? ORDER BY name ASC', [state])
+      : await connection.query('SELECT id, name, state FROM districts ORDER BY name ASC');
+    res.json({ success: true, districts });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch districts', details: error.message });
   } finally {
     if (connection) connection.release();
   }

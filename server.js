@@ -148,6 +148,9 @@ app.use('/api/admins', requireAdmin, adminsRouter);
 const districtsRouter = require('./routes/districts');
 app.use('/api/districts', requireAdmin, districtsRouter);
 
+const universitiesRouter = require('./routes/universities');
+app.use('/api/universities', universitiesRouter); // auth handled per-route inside
+
 const departmentsRouter = require('./routes/departments');
 app.use('/api/departments', requireAdmin, departmentsRouter);
 

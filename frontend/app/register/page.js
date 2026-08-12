@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { validateStudentForm, isValidMobile } from "@/lib/validators";
+import { StateDistrictSelect } from "@/components/StateDistrictSelect";
 
 // Parse a field's `options` column which may arrive as a JSON string, an array
 // of strings, or an array of { value, label } objects.
@@ -38,6 +39,12 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [success, setSuccess] = useState(null);
 
+  // State -> District narrows the College dropdown below it (item #23 --
+  // reusing the same cascading component as the admin colleges form).
+  // Not submitted as its own field; it just filters which colleges show.
+  const [regState, setRegState] = useState("");
+  const [regDistrictId, setRegDistrictId] = useState("");
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -55,6 +62,14 @@ export default function RegisterPage() {
     };
     loadConfig();
   }, []);
+
+  // Re-fetch the college list scoped to the chosen district. Falls back to
+  // the full list when no district is picked, so this narrowing is a
+  // convenience, not a hard requirement.
+  useEffect(() => {
+    const params = regDistrictId ? `?districtId=${encodeURIComponent(regDistrictId)}` : "";
+    api.get(`/api/public/colleges${params}`).then((d) => setColleges(d.colleges || [])).catch(() => {});
+  }, [regDistrictId]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -131,18 +146,29 @@ export default function RegisterPage() {
       </span>
     );
 
-    // College dropdown (special — fed from the colleges master table)
+    // College dropdown (special — fed from the colleges master table).
+    // Narrowed by the State -> District cascade above it, which is why this
+    // one field spans both columns.
     if (field.field_name === "collegeId") {
       return (
-        <label key={field.field_name} className="block">
-          {label}
-          <select name="collegeId" required={required} onChange={handleChange} value={formData.collegeId || ""} className={`${baseInput} bg-white`}>
-            <option value="">— Select your college —</option>
-            {colleges.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </label>
+        <div key={field.field_name} className="md:col-span-2">
+          <StateDistrictSelect
+            state={regState}
+            districtId={regDistrictId}
+            onStateChange={setRegState}
+            onDistrictChange={setRegDistrictId}
+            className="mb-4"
+          />
+          <label className="block">
+            {label}
+            <select name="collegeId" required={required} onChange={handleChange} value={formData.collegeId || ""} className={`${baseInput} bg-white`}>
+              <option value="">— Select your college —</option>
+              {colleges.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       );
     }
 

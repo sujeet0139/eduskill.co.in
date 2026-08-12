@@ -2,18 +2,37 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
-// GET ALL DISTRICTS
+// GET ALL DISTRICTS (optionally ?state= for the State -> District cascade)
 router.get('/', async (req, res) => {
+  const { state } = req.query;
   let connection;
   try {
     connection = await pool.getConnection();
-    const [districts] = await connection.query(`
+    const params = [];
+    let query = `
       SELECT d.*,
              (SELECT COUNT(*) FROM colleges WHERE district_id = d.id) as total_colleges
       FROM districts d
-      ORDER BY d.name ASC
-    `);
+      WHERE 1=1
+    `;
+    if (state) { query += ' AND d.state = ?'; params.push(state); }
+    query += ' ORDER BY d.name ASC';
+    const [districts] = await connection.query(query, params);
     res.json({ success: true, districts });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// GET distinct states -- for the State dropdown itself.
+router.get('/states', async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [rows] = await connection.query('SELECT DISTINCT state FROM districts ORDER BY state ASC');
+    res.json({ success: true, states: rows.map((r) => r.state) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {

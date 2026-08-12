@@ -89,6 +89,45 @@ async function checkDatabase() {
     // Note: Checking for foreign keys is more complex, so the original try/catch is acceptable here for simplicity.
     try { await connection.query("ALTER TABLE colleges ADD CONSTRAINT fk_district FOREIGN KEY (district_id) REFERENCES districts(id) ON DELETE SET NULL"); } catch(e){}
 
+    // Item #23 -- college form improvements.
+    // `districts` had no `state` column at all, so the college form's State
+    // field and District dropdown were two independent, uncoordinated inputs
+    // -- nothing was actually cascading. DEFAULT 'Bihar' backfills every
+    // existing district automatically (accurate today; districts added for
+    // a different state going forward just need this set explicitly).
+    await runAlterIfMissing('districts', 'state', "ALTER TABLE districts ADD COLUMN state VARCHAR(50) NOT NULL DEFAULT 'Bihar'");
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS universities (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        name VARCHAR(200) NOT NULL UNIQUE
+      )
+    `);
+    await connection.query(`INSERT IGNORE INTO universities (name) VALUES ('Lalit Narayan Mithila University (LNMU)')`);
+
+    await runAlterIfMissing('colleges', 'university_id', "ALTER TABLE colleges ADD COLUMN university_id INT");
+    await runAlterIfMissing('colleges', 'website', "ALTER TABLE colleges ADD COLUMN website VARCHAR(255)");
+    await runAlterIfMissing('colleges', 'logo_url', "ALTER TABLE colleges ADD COLUMN logo_url VARCHAR(500)");
+    // Structured replacements for the old free-text `principal_details` blob
+    // -- kept alongside it (not replacing) so no existing data is lost.
+    await runAlterIfMissing('colleges', 'principal_name', "ALTER TABLE colleges ADD COLUMN principal_name VARCHAR(150)");
+    await runAlterIfMissing('colleges', 'principal_phone', "ALTER TABLE colleges ADD COLUMN principal_phone VARCHAR(20)");
+    try { await connection.query("ALTER TABLE colleges ADD CONSTRAINT fk_college_university FOREIGN KEY (university_id) REFERENCES universities(id) ON DELETE SET NULL"); } catch (e) {}
+
+    // HOD Details -- "support multiple" per the dev-prompt, so a table, not
+    // a column.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS college_hods (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        college_id INT NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        department VARCHAR(150),
+        phone VARCHAR(20),
+        email VARCHAR(150),
+        FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE CASCADE
+      )
+    `);
+
     // 1A. DEPARTMENTS TABLE
     await connection.query(`
       CREATE TABLE IF NOT EXISTS departments (
