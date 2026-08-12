@@ -168,6 +168,82 @@ async function checkDatabase() {
     await runAlterIfMissing('students', 'reset_token_expiry', "ALTER TABLE students ADD COLUMN reset_token_expiry DATETIME AFTER reset_token");
     try { await connection.query("ALTER TABLE students ADD CONSTRAINT fk_student_college FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE CASCADE"); } catch(e){}
 
+    // Expanded student master record (dev-prompt Priority 1 item #12) — all
+    // nullable/optional per the dev-prompt's own instruction: new fields must
+    // never become a new required-at-signup failure point. Fillable later
+    // from the student panel/admin edit screen.
+    await runAlterIfMissing('students', 'dob', "ALTER TABLE students ADD COLUMN dob DATE AFTER address_permanent");
+    await runAlterIfMissing('students', 'gender', "ALTER TABLE students ADD COLUMN gender ENUM('male', 'female', 'other') AFTER dob");
+    await runAlterIfMissing('students', 'blood_group', "ALTER TABLE students ADD COLUMN blood_group VARCHAR(5) AFTER gender");
+    await runAlterIfMissing('students', 'emergency_contact_name', "ALTER TABLE students ADD COLUMN emergency_contact_name VARCHAR(100) AFTER blood_group");
+    await runAlterIfMissing('students', 'emergency_contact_phone', "ALTER TABLE students ADD COLUMN emergency_contact_phone VARCHAR(20) AFTER emergency_contact_name");
+    await runAlterIfMissing('students', 'linkedin_url', "ALTER TABLE students ADD COLUMN linkedin_url VARCHAR(255) AFTER emergency_contact_phone");
+    await runAlterIfMissing('students', 'github_url', "ALTER TABLE students ADD COLUMN github_url VARCHAR(255) AFTER linkedin_url");
+    await runAlterIfMissing('students', 'employment_status', "ALTER TABLE students ADD COLUMN employment_status VARCHAR(50) AFTER github_url");
+    await runAlterIfMissing('students', 'referral_source', "ALTER TABLE students ADD COLUMN referral_source VARCHAR(100) AFTER employment_status");
+
+    // Guest vs Enrolled (item #16) — automatic, flips on confirmed payment.
+    // Deliberately a separate column from the existing `status` (identity/
+    // verification lifecycle: registered/verified/completed), which was being
+    // asked to mean two different things at once.
+    await runAlterIfMissing('students', 'enrollment_status', "ALTER TABLE students ADD COLUMN enrollment_status ENUM('guest', 'enrolled') DEFAULT 'guest' AFTER status");
+    // Active/Inactive (item #18) — separate MANUAL override, so an Enrolled
+    // student on a break can be marked Inactive without losing Enrolled history.
+    await runAlterIfMissing('students', 'is_active', "ALTER TABLE students ADD COLUMN is_active BOOLEAN DEFAULT TRUE AFTER enrollment_status");
+
+    // Program -> Track (Major/Minor) -> Course hierarchy (item #14). Additive
+    // only: `track_id` on courses is nullable, and the pre-existing direct
+    // `batches.program_id` link is left untouched, so every course/program/
+    // batch that already exists keeps working exactly as before, uncategorized.
+    // Assigning existing courses to a track/program is an admin classification
+    // task (via the Programs admin screen), not something to guess/auto-migrate.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS tracks (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        program_id INT NOT NULL,
+        name ENUM('major', 'minor') NOT NULL,
+        label VARCHAR(100),
+        FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_program_track (program_id, name)
+      )
+    `);
+    await runAlterIfMissing('courses', 'track_id', "ALTER TABLE courses ADD COLUMN track_id INT AFTER category");
+    try { await connection.query("ALTER TABLE courses ADD CONSTRAINT fk_course_track FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE SET NULL"); } catch (e) {}
+
+    // Educational background (item #13) — one row per level (10th/12th/degree),
+    // optional, fillable post-registration, with an uploaded certificate scan.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS student_education (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        student_id INT NOT NULL,
+        level ENUM('10th', '12th', 'graduate', 'other') NOT NULL,
+        board_university VARCHAR(150),
+        stream VARCHAR(100),
+        degree_name VARCHAR(150),
+        institution VARCHAR(150),
+        year_of_passing INT,
+        percentage_or_cgpa VARCHAR(20),
+        certificate_url VARCHAR(500),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Access log for restricted fields (item #12's Aadhaar note: "mark as a
+    // restricted field with access logging, not a plain text column"). Every
+    // time an admin's full-profile view returns a student's Aadhaar number,
+    // a row lands here — see routes/students.js full-profile.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS sensitive_field_access_log (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        student_id INT NOT NULL,
+        field_name VARCHAR(50) NOT NULL,
+        accessed_by_admin_id INT,
+        accessed_by_email VARCHAR(150),
+        accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // 3. PAYMENTS TABLE (Enhanced)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS payments (
