@@ -443,6 +443,41 @@ router.post('/upload-document', docUpload.single('document'), async (req, res) =
   }
 });
 
+// EDUCATIONAL BACKGROUND (dev-prompt item #13) — 10th/12th/graduate rows,
+// optional, fillable post-registration, each with an uploaded certificate scan.
+router.post('/:id/education', requireAdmin, docUpload.single('certificate'), async (req, res) => {
+  const { level, board_university, stream, degree_name, institution, year_of_passing, percentage_or_cgpa } = req.body;
+  if (!level) return res.status(400).json({ error: 'level is required.' });
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const certificateUrl = req.file ? require('../config/storage').fileUrl(req.file) : null;
+    await connection.query(
+      `INSERT INTO student_education (student_id, level, board_university, stream, degree_name, institution, year_of_passing, percentage_or_cgpa, certificate_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.params.id, level, board_university || null, stream || null, degree_name || null, institution || null, year_of_passing || null, percentage_or_cgpa || null, certificateUrl]
+    );
+    res.status(201).json({ success: true, message: 'Education record added.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+router.delete('/:id/education/:eduId', requireAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.query('DELETE FROM student_education WHERE id = ? AND student_id = ?', [req.params.eduId, req.params.id]);
+    res.json({ success: true, message: 'Education record removed.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 // ADMIN: UPDATE DOCUMENT STATUS
 router.put('/documents/:docId/status', requireAdmin, async (req, res) => {
   const { status, notes } = req.body;
@@ -465,18 +500,44 @@ router.put('/documents/:docId/status', requireAdmin, async (req, res) => {
 });
 
 // UPDATE STUDENT
+// Columns PUT /:id is willing to update. The "core" ones stay required-shaped
+// (always sent by the existing edit form); everything after them is the
+// item #12 expansion -- optional, only written when the caller actually
+// sends that key, so a small "fill in your DOB" form doesn't wipe other
+// fields the way blindly overwriting every column would.
+const CORE_STUDENT_FIELDS = ['name', 'email', 'phone', 'collegeId', 'department', 'status', 'roll_number', 'current_year', 'wallet_balance'];
+const CORE_STUDENT_COLUMNS = { collegeId: 'college_id' };
+const OPTIONAL_STUDENT_FIELDS = [
+  'dob', 'gender', 'blood_group', 'emergency_contact_name', 'emergency_contact_phone',
+  'linkedin_url', 'github_url', 'employment_status', 'referral_source', 'address_permanent',
+  'father_name', 'mother_name', 'parent_phone',
+];
+
 router.put('/:id', requireAdmin, async (req, res) => {
-  const { name, email, phone, collegeId, department, status, roll_number, current_year, wallet_balance } = req.body;
+  const { email, phone } = req.body;
   let connection;
   try {
     const fmtErr = validateStudentFields({ email, phone });
     if (fmtErr) return res.status(400).json({ error: fmtErr });
-    const normPhone = phone ? normalizeMobile(phone) : phone;
+
+    const sets = [];
+    const values = [];
+    for (const field of CORE_STUDENT_FIELDS) {
+      const column = CORE_STUDENT_COLUMNS[field] || field;
+      let value = req.body[field];
+      if (field === 'phone' && value) value = normalizeMobile(value);
+      sets.push(`${column} = ?`);
+      values.push(value ?? null);
+    }
+    for (const field of OPTIONAL_STUDENT_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        sets.push(`${field} = ?`);
+        values.push(req.body[field] || null);
+      }
+    }
+
     connection = await pool.getConnection();
-    await connection.query(
-      'UPDATE students SET name=?, email=?, phone=?, college_id=?, department=?, status=?, roll_number=?, current_year=?, wallet_balance=? WHERE id=?',
-      [name, email, normPhone, collegeId, department, status, roll_number, current_year, wallet_balance, req.params.id]
-    );
+    await connection.query(`UPDATE students SET ${sets.join(', ')} WHERE id = ?`, [...values, req.params.id]);
     res.json({ success: true, message: 'Student updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });

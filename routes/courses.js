@@ -35,14 +35,14 @@ router.get('/', async (req, res) => {
 
 // CREATE NEW COURSE
 router.post('/', requireAdmin, async (req, res) => {
-  const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status } = req.body;
+  const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status, track_id } = req.body;
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.query(
-      `INSERT INTO courses (title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, category, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status || 'draft']
+      `INSERT INTO courses (title, category, track_id, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, category, track_id || null, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status || 'draft']
     );
     res.json({ success: true, message: 'Course created successfully' });
   } catch (error) {
@@ -54,13 +54,13 @@ router.post('/', requireAdmin, async (req, res) => {
 
 // UPDATE COURSE
 router.put('/:id', requireAdmin, async (req, res) => {
-  const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status } = req.body;
+  const { title, category, subject, description, content_pdf, duration_weeks, price, min_payment, language, level, status, track_id } = req.body;
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.query(
-      `UPDATE courses SET title=?, category=?, subject=?, description=?, content_pdf=?, duration_weeks=?, price=?, min_payment=?, language=?, level=?, status=? WHERE id=?`,
-      [title, category, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status, req.params.id]
+      `UPDATE courses SET title=?, category=?, track_id=?, subject=?, description=?, content_pdf=?, duration_weeks=?, price=?, min_payment=?, language=?, level=?, status=? WHERE id=?`,
+      [title, category, track_id || null, subject || null, description, content_pdf || null, duration_weeks, price || 0, min_payment || 0, language, level, status, req.params.id]
     );
     res.json({ success: true, message: 'Course updated successfully' });
   } catch (error) {

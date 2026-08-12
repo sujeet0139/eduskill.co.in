@@ -68,4 +68,44 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// Program -> Track (Major/Minor) -> Course hierarchy (dev-prompt item #14).
+// A program has at most one "major" and one "minor" track (enforced by the
+// unique_program_track key in check-db.js); courses are then classified into
+// a track via courses.track_id.
+router.get('/:id/tracks', requireAdmin, async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [tracks] = await connection.query(
+      `SELECT t.*, (SELECT COUNT(*) FROM courses c WHERE c.track_id = t.id) as course_count
+       FROM tracks t WHERE t.program_id = ? ORDER BY t.name`, [req.params.id]);
+    res.json({ success: true, tracks });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+router.post('/:id/tracks', requireAdmin, async (req, res) => {
+  const { name, label } = req.body;
+  if (!['major', 'minor'].includes(name)) {
+    return res.status(400).json({ error: "name must be 'major' or 'minor'." });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.query(
+      `INSERT INTO tracks (program_id, name, label) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE label = VALUES(label)`,
+      [req.params.id, name, label || null]
+    );
+    res.json({ success: true, message: 'Track saved.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 module.exports = router;
