@@ -230,25 +230,6 @@ async function checkDatabase() {
     // student on a break can be marked Inactive without losing Enrolled history.
     await runAlterIfMissing('students', 'is_active', "ALTER TABLE students ADD COLUMN is_active BOOLEAN DEFAULT TRUE AFTER enrollment_status");
 
-    // Program -> Track (Major/Minor) -> Course hierarchy (item #14). Additive
-    // only: `track_id` on courses is nullable, and the pre-existing direct
-    // `batches.program_id` link is left untouched, so every course/program/
-    // batch that already exists keeps working exactly as before, uncategorized.
-    // Assigning existing courses to a track/program is an admin classification
-    // task (via the Programs admin screen), not something to guess/auto-migrate.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS tracks (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        program_id INT NOT NULL,
-        name ENUM('major', 'minor') NOT NULL,
-        label VARCHAR(100),
-        FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_program_track (program_id, name)
-      )
-    `);
-    await runAlterIfMissing('courses', 'track_id', "ALTER TABLE courses ADD COLUMN track_id INT AFTER category");
-    try { await connection.query("ALTER TABLE courses ADD CONSTRAINT fk_course_track FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE SET NULL"); } catch (e) {}
-
     // Educational background (item #13) — one row per level (10th/12th/degree),
     // optional, fillable post-registration, with an uploaded certificate scan.
     await connection.query(`
@@ -409,6 +390,28 @@ async function checkDatabase() {
     await runAlterIfMissing('courses', 'image_url', "ALTER TABLE courses ADD COLUMN image_url VARCHAR(500) AFTER content_pdf");
     await runAlterIfMissing('programs', 'min_payment', "ALTER TABLE programs ADD COLUMN min_payment DECIMAL(10,2) DEFAULT 0 AFTER fee");
 
+    // Program -> Track (Major/Minor) -> Course hierarchy (item #14). Additive
+    // only: `track_id` on courses is nullable, and the pre-existing direct
+    // `batches.program_id` link is left untouched, so every course/program/
+    // batch that already exists keeps working exactly as before, uncategorized.
+    // Assigning existing courses to a track/program is an admin classification
+    // task (via the Programs admin screen), not something to guess/auto-migrate.
+    // Placed here (not right after the `programs` table itself) because its
+    // FK needs BOTH `programs` and `courses` to already exist -- both are
+    // created above this point.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS tracks (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        program_id INT NOT NULL,
+        name ENUM('major', 'minor') NOT NULL,
+        label VARCHAR(100),
+        FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_program_track (program_id, name)
+      )
+    `);
+    await runAlterIfMissing('courses', 'track_id', "ALTER TABLE courses ADD COLUMN track_id INT AFTER category");
+    try { await connection.query("ALTER TABLE courses ADD CONSTRAINT fk_course_track FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE SET NULL"); } catch (e) {}
+
     // 7A. BATCHES TABLE (For Courses & Programs)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS batches (
@@ -427,14 +430,6 @@ async function checkDatabase() {
         FOREIGN KEY (mentor_id) REFERENCES faculty(id) ON DELETE SET NULL
       )
     `);
-
-    // Item #27's "view of only their assigned batches" needs a real link
-    // from a batch to the teacher who logs into the teacher portal. The
-    // pre-existing `mentor_id` points at the separate, login-less `faculty`
-    // table (used elsewhere as a lightweight guest-mentor reference) --
-    // deliberately left untouched. This is a second, additive assignment.
-    await runAlterIfMissing('batches', 'teacher_id', "ALTER TABLE batches ADD COLUMN teacher_id INT AFTER mentor_id");
-    try { await connection.query("ALTER TABLE batches ADD CONSTRAINT fk_batch_teacher FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE SET NULL"); } catch (e) {}
 
     // 8. COURSE MODULES & LESSONS
     await connection.query(`
@@ -833,6 +828,16 @@ async function checkDatabase() {
     // Self-authored profile bio (item #27) -- distinct from `remarks`, which
     // is an admin-only internal note.
     await runAlterIfMissing('teachers', 'bio', "ALTER TABLE teachers ADD COLUMN bio TEXT AFTER expertise");
+
+    // Item #27's "view of only their assigned batches" needs a real link
+    // from a batch to the teacher who logs into the teacher portal. The
+    // pre-existing `mentor_id` points at the separate, login-less `faculty`
+    // table (used elsewhere as a lightweight guest-mentor reference) --
+    // deliberately left untouched. This is a second, additive assignment.
+    // Placed here (not right after the `batches` table itself, much earlier
+    // in this file) because the FK needs `teachers` to already exist.
+    await runAlterIfMissing('batches', 'teacher_id', "ALTER TABLE batches ADD COLUMN teacher_id INT AFTER mentor_id");
+    try { await connection.query("ALTER TABLE batches ADD CONSTRAINT fk_batch_teacher FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE SET NULL"); } catch (e) {}
 
     // 22. STUDENT DOCUMENTS TABLE
     await connection.query(`
