@@ -6,6 +6,7 @@ const bcrypt = require('bcryptjs');
 const { requireAdmin } = require('../middleware/authMiddleware');
 const { validateStudentFields, normalizeMobile, isValidPan } = require('../lib/validators');
 const { logRegistrationFailure } = require('../lib/failureLog');
+const { notifyStudent } = require('../lib/notify');
 
 // STUDENT REGISTRATION ENDPOINT
 router.post('/register', async (req, res) => {
@@ -89,11 +90,13 @@ router.post('/register', async (req, res) => {
       }
     }
 
-    // SEND CONFIRMATION EMAIL — fire-and-forget. Registration must never hang
-    // waiting on a slow/unreachable SMTP server (this was the root cause of
-    // the "please wait forever" hang — see email.js for the added timeouts).
+    // SEND CONFIRMATION EMAIL / SMS / WHATSAPP — fire-and-forget. Registration
+    // must never hang waiting on any of these (this was the root cause of the
+    // "please wait forever" hang — see email.js for the added timeouts, and
+    // lib/notify.js, which no-ops safely until a gateway is configured).
     sendWelcomeEmail(studentData.email, studentData.name, referenceNo)
       .catch((emailErr) => console.error('Email sending failed:', emailErr.message));
+    notifyStudent(studentData.phone, `Welcome to EduSkill! Your registration is successful. Reference No: ${referenceNo}. Login at eduskill.co.in`);
 
     res.status(201).json({
       success: true,
@@ -438,6 +441,11 @@ router.put('/:id/verify', requireAdmin, async (req, res) => {
   try {
     connection = await pool.getConnection();
     await connection.query('UPDATE students SET status="verified" WHERE id=?', [req.params.id]);
+    // Status change relevant to the student (dev-prompt item #9). Fetched
+    // before responding so any lookup error still goes through the normal
+    // error response below instead of trying to send a second response.
+    const [[student]] = await connection.query('SELECT phone FROM students WHERE id = ?', [req.params.id]);
+    if (student) notifyStudent(student.phone, 'Your EduSkill account has been verified. You can now log in.');
     res.json({ success: true, message: 'Student verified successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -544,10 +552,12 @@ router.post('/', requireAdmin, async (req, res) => {
        collegeId || null, department || null]
     );
 
-    // Fire-and-forget — never let a slow/unreachable SMTP server delay this
-    // response (was the root cause of "Add Student" hanging on "please wait").
+    // Fire-and-forget — never let a slow/unreachable SMTP server (or SMS/
+    // WhatsApp gateway) delay this response (was the root cause of "Add
+    // Student" hanging on "please wait").
     sendWelcomeEmail(email, name, referenceNo)
       .catch((e) => console.error('Welcome email failed:', e.message));
+    notifyStudent(normPhone, `Welcome to EduSkill, ${name}! Your account has been created. Reference No: ${referenceNo}.`);
 
     res.status(201).json({
       success: true,

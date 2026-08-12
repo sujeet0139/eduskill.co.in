@@ -31,42 +31,46 @@ router.post('/upload-qr', qrUpload.single('qr'), async (req, res) => {
 
 // GET ALL SETTINGS
 router.get('/', async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [rows] = await connection.query('SELECT setting_key, setting_value FROM settings');
-    connection.release();
-    
+
     // Convert array of rows into a single key-value object
     const settings = rows.reduce((acc, row) => {
       acc[row.setting_key] = row.setting_value;
       return acc;
     }, {});
-    
+
     res.json({ success: true, settings });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // BULK UPDATE SETTINGS
 router.put('/', async (req, res) => {
   const settingsToUpdate = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     // Upsert each setting
     for (const [key, value] of Object.entries(settingsToUpdate)) {
       await connection.query(
-        `INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) 
+        `INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
          ON DUPLICATE KEY UPDATE setting_value = ?`,
         [key, value, value]
       );
     }
-    
-    connection.release();
+
     res.json({ success: true, message: 'Settings updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

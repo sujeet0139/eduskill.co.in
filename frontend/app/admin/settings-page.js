@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { PageHeader } from "@/components/admin";
 import { Card, Input, Button, Alert } from "@/components/ui";
-import { Building2, CreditCard, Mail, Save, Check, AlertCircle, Share2 } from "lucide-react";
+import { Building2, CreditCard, Mail, Save, Check, AlertCircle, Share2, MessageSquare } from "lucide-react";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("institute");
@@ -79,6 +79,7 @@ export default function SettingsPage() {
     { id: "payment", label: "Payment Settings", icon: CreditCard },
     { id: "social", label: "Social Media", icon: Share2 },
     { id: "email", label: "Email (SMTP)", icon: Mail },
+    { id: "notifications", label: "SMS / WhatsApp", icon: MessageSquare },
   ];
 
   if (loading) {
@@ -423,6 +424,54 @@ export default function SettingsPage() {
                     <p className="text-xs text-gray-500 mt-1">Should be verified with your SMTP provider</p>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Notifications (SMS / WhatsApp) Tab */}
+          {activeTab === "notifications" && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
+                <MessageSquare className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-semibold">SMS / WhatsApp gateway</p>
+                  <p>
+                    Paste the send URL your SMS/WhatsApp provider gives you, with the literal
+                    placeholders <code className="rounded bg-white/60 px-1">{"{phone}"}</code> and{" "}
+                    <code className="rounded bg-white/60 px-1">{"{message}"}</code> where the
+                    phone number and text should go — we substitute those and call the URL.
+                    Bake your API key into the URL itself (as your provider's docs show).
+                    Leave blank to disable — registration/payment/status emails keep working
+                    either way, this only adds SMS/WhatsApp on top.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-900 mb-2">SMS Send URL</label>
+                <Input
+                  name="sms_url_template"
+                  value={settings.sms_url_template || ""}
+                  onChange={handleChange}
+                  placeholder="https://api.yourprovider.com/send?authkey=XXXX&mobile={phone}&message={message}"
+                />
+                <p className="text-xs text-gray-500 mt-1">Blank = SMS notifications disabled.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-900 mb-2">WhatsApp Send URL</label>
+                <Input
+                  name="whatsapp_url_template"
+                  value={settings.whatsapp_url_template || ""}
+                  onChange={handleChange}
+                  placeholder="https://api.yourwhatsappprovider.com/send?token=XXXX&to={phone}&text={message}"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Blank = WhatsApp notifications disabled. If your provider needs something other
+                  than a simple GET URL (e.g. a POST with a JSON body or a message template ID),
+                  tell your developer which provider it is — this field will need a small code
+                  change to match its API, not just a setting.
+                </p>
               </div>
             </div>
           )}

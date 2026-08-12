@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
 const { sendPaymentConfirmationEmail } = require('../email');
+const { notifyStudent } = require('../lib/notify');
 const { requireAdmin } = require('../middleware/authMiddleware');
 
 // Screenshot uploads (image/PDF, 5 MB).
@@ -202,12 +203,12 @@ router.get('/', requireAdmin, async (req, res) => {
 // 4. ADMIN: APPROVE A PENDING PAYMENT
 router.post('/:id/approve', requireAdmin, async (req, res) => {
   const { transaction_id, notes } = req.body;
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     const [[payment]] = await connection.query('SELECT * FROM payments WHERE id = ? AND status = "pending"', [req.params.id]);
     if (!payment) {
-      connection.release();
       return res.status(404).json({ error: 'Pending payment not found.' });
     }
 
@@ -228,17 +229,21 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
 
     await connection.query('UPDATE students SET status = "verified" WHERE id = ? AND status = "registered"', [student_id]);
 
-    const [[student]] = await connection.query('SELECT name, email FROM students WHERE id = ?', [student_id]);
-    connection.release();
+    const [[student]] = await connection.query('SELECT name, email, phone FROM students WHERE id = ?', [student_id]);
 
-    // Send confirmation email
+    // Fire-and-forget — approving a payment must never hang on email/SMS/
+    // WhatsApp delivery (same lesson as dev-prompt item #1).
     if (student) {
-      await sendPaymentConfirmationEmail(student.email, student.name, payment);
+      sendPaymentConfirmationEmail(student.email, student.name, payment)
+        .catch((e) => console.error('Payment confirmation email failed:', e.message));
+      notifyStudent(student.phone, `Payment of ₹${amount} received. Your ${payment_for_type} enrollment is confirmed. - EduSkill`);
     }
 
     res.json({ success: true, message: 'Payment approved successfully.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
