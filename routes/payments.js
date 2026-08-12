@@ -84,6 +84,14 @@ router.post('/initiate', async (req, res) => {
         if (batch_id) await connection.query('UPDATE batches SET current_enrolled = current_enrolled + 1 WHERE id = ?', [batch_id]);
       }
 
+      // Guest -> Enrolled (item #16) -- this is the OTHER path that enrolls a
+      // student in a paid course/program (the other being the admin-approve
+      // route below). Missing this here would leave any wallet-covered
+      // enrollment stuck showing "Guest" forever.
+      if (item_type === 'course' || item_type === 'program') {
+        await connection.query("UPDATE students SET enrollment_status = 'enrolled' WHERE id = ? AND enrollment_status = 'guest'", [student_id]);
+      }
+
       return res.json({ success: true, message: 'Enrolled successfully using wallet balance.', payment_type: 'wallet' });
     }
 
@@ -304,6 +312,20 @@ router.post('/manual', requireAdmin, async (req, res) => {
        VALUES (?, ?, ?, ?, 'bank_transfer', 'completed', ?, ?)`,
       [studentId, amount, item_type || 'registration', item_id || null, paymentDate || new Date(), referenceNo || null]
     );
+
+    // This route previously only recorded the payment and never actually
+    // enrolled the student -- found while cross-checking the flow against
+    // the other two enrollment paths (wallet-covered in /initiate, gateway
+    // in /:id/approve), which both do this. Bringing it in line with those.
+    if (item_type === 'course') {
+      await connection.query('INSERT INTO student_courses (student_id, course_id, status) VALUES (?, ?, "enrolled") ON DUPLICATE KEY UPDATE status="enrolled"', [studentId, item_id]);
+    } else if (item_type === 'program') {
+      await connection.query('INSERT INTO student_programs (student_id, program_id, status) VALUES (?, ?, "enrolled") ON DUPLICATE KEY UPDATE status="enrolled"', [studentId, item_id]);
+    }
+    if (item_type === 'course' || item_type === 'program') {
+      await connection.query("UPDATE students SET enrollment_status = 'enrolled' WHERE id = ? AND enrollment_status = 'guest'", [studentId]);
+    }
+
     res.json({ success: true, message: 'Manual payment recorded.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
