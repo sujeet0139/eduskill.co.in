@@ -50,6 +50,16 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
+    // Say so explicitly rather than silently allowing a second account on the
+    // same number (dev-prompt Priority 0 item #6) — there was previously no
+    // duplicate-phone check here at all.
+    if (studentData.phone) {
+      const [existingPhone] = await connection.query('SELECT id FROM students WHERE phone = ?', [studentData.phone]);
+      if (existingPhone.length > 0) {
+        return res.status(400).json({ error: 'This mobile/WhatsApp number is already registered.' });
+      }
+    }
+
     // Generate Enrollment ID (e.g., ENR240001)
     const currentYear = new Date().getFullYear().toString().slice(-2);
     const [[lastStudent]] = await connection.query("SELECT id FROM students ORDER BY id DESC LIMIT 1");
@@ -508,6 +518,14 @@ router.post('/', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
+    const normPhone = phone ? normalizeMobile(phone) : null;
+    if (normPhone) {
+      const [existingPhone] = await connection.query('SELECT id FROM students WHERE phone = ?', [normPhone]);
+      if (existingPhone.length > 0) {
+        return res.status(400).json({ error: 'This mobile/WhatsApp number is already registered.' });
+      }
+    }
+
     const currentYear = new Date().getFullYear().toString().slice(-2);
     const [[lastStudent]] = await connection.query('SELECT id FROM students ORDER BY id DESC LIMIT 1');
     const nextId = (lastStudent ? lastStudent.id : 0) + 1;
@@ -521,7 +539,7 @@ router.post('/', requireAdmin, async (req, res) => {
     const [result] = await connection.query(
       `INSERT INTO students (enrollment_id, reference_no, name, email, password_hash, phone, aadhar, pan, roll_number, current_year, college_id, department, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registered')`,
-      [enrollmentId, referenceNo, name, email, passwordHash, phone ? normalizeMobile(phone) : null,
+      [enrollmentId, referenceNo, name, email, passwordHash, normPhone,
        aadhar || null, pan ? String(pan).toUpperCase() : null, roll_number || null, current_year || 1,
        collegeId || null, department || null]
     );

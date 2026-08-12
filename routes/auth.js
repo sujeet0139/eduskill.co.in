@@ -18,19 +18,19 @@ function issueSession(res, payload) {
 // STUDENT LOGIN ENDPOINT
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  
+  let connection;
+
   try {
     if (!email || !password) {
       return res.status(400).json({ error: 'Please provide email and password' });
     }
 
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     const [students] = await connection.query(
       'SELECT * FROM students WHERE email = ?',
       [email]
     );
-    connection.release();
 
     if (students.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -40,12 +40,23 @@ router.post('/login', async (req, res) => {
 
     // If password_hash is not set, fall back to reference_no for old accounts.
     // Otherwise, use secure bcrypt comparison.
+    const isLegacyAccount = !student.password_hash;
     const isMatch = student.password_hash
       ? await bcrypt.compare(password, student.password_hash)
       : (password === student.reference_no);
 
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Legacy accounts were logging in with their public reference number as
+    // the "password" -- that's printed on receipts and shared over WhatsApp/
+    // email, so it's not really a secret. Migrate to a real bcrypt hash the
+    // moment such an account successfully logs in, so this exposure closes
+    // itself out over time without forcing a mass password reset.
+    if (isLegacyAccount) {
+      const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+      await connection.query('UPDATE students SET password_hash = ? WHERE id = ?', [passwordHash, student.id]);
     }
 
     // Generate a secure session token (also sets the httpOnly session cookie)
@@ -55,6 +66,8 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error during login' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

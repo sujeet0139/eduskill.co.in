@@ -40,11 +40,23 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rate Limiting: Max 200 requests per 15 minutes per IP
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
+  windowMs: 15 * 60 * 1000,
   max: 200,
   message: { error: 'Too many requests from this IP, please try again later.' }
 });
 app.use('/api', apiLimiter);
+
+// Stricter limit on login attempts specifically, to slow down brute-forcing a
+// password — the generic 200-req/15min apiLimiter above is far too loose for
+// that on its own (dev-prompt Priority 0 item #10).
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many login attempts. Please wait a few minutes and try again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(['/api/auth/login', '/api/auth/admin/login', '/api/auth/teacher/login'], loginLimiter);
 
 // Create uploads folder for local-disk storage. On serverless hosts the app
 // filesystem is read-only/ephemeral (uploads go to Cloudinary instead), so this

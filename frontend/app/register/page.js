@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { validateStudentForm } from "@/lib/validators";
+import { validateStudentForm, isValidMobile } from "@/lib/validators";
 
 // Parse a field's `options` column which may arrive as a JSON string, an array
 // of strings, or an array of { value, label } objects.
@@ -164,6 +164,8 @@ export default function RegisterPage() {
 
     // Password field with show/hide toggle
     if (field.type === "password") {
+      const pwd = formData[field.field_name] || "";
+      const pwdLongEnough = pwd.length >= 6;
       return (
         <label key={field.field_name} className="block md:col-span-2">
           {label}
@@ -174,8 +176,7 @@ export default function RegisterPage() {
               required={required}
               minLength={6}
               onChange={handleChange}
-              value={formData[field.field_name] || ""}
-              placeholder="At least 6 characters"
+              value={pwd}
               className={`${baseInput} pr-16`}
             />
             <button
@@ -186,6 +187,11 @@ export default function RegisterPage() {
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
+          {/* Persistent rule, not just a placeholder that disappears once typing
+              starts — the point is the requirement stays visible before submit. */}
+          <p className={`mt-1 text-xs ${pwd && !pwdLongEnough ? "text-red-500" : "text-gray-500"}`}>
+            {pwd && pwdLongEnough ? "✓ " : ""}Minimum 6 characters.
+          </p>
         </label>
       );
     }
@@ -198,6 +204,17 @@ export default function RegisterPage() {
       pan: { maxLength: 10, placeholder: "ABCDE1234F", style: { textTransform: "uppercase" } },
     }[field.field_name] || {};
 
+    // Persistent format rule shown under the field before submit (not just a
+    // placeholder), plus live valid/invalid feedback as the value changes.
+    const persistentHints = {
+      phone: "10 digits, no spaces, starting 6-9.",
+      mobile: "10 digits, no spaces, starting 6-9.",
+      aadhar: "12 digits, numbers only.",
+    }[field.field_name];
+    const value = formData[field.field_name] || "";
+    const isMobileField = field.field_name === "phone" || field.field_name === "mobile";
+    const mobileTouchedAndInvalid = isMobileField && value.length > 0 && !isValidMobile(value);
+
     // Generic input (text / email / tel / number)
     return (
       <label key={field.field_name} className="block">
@@ -207,10 +224,15 @@ export default function RegisterPage() {
           name={field.field_name}
           required={required}
           onChange={handleChange}
-          value={formData[field.field_name] || ""}
+          value={value}
           className={baseInput}
           {...hints}
         />
+        {persistentHints && (
+          <p className={`mt-1 text-xs ${mobileTouchedAndInvalid ? "text-red-500" : "text-gray-500"}`}>
+            {persistentHints}
+          </p>
+        )}
       </label>
     );
   };
