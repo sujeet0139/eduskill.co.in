@@ -104,8 +104,17 @@ app.use('/api/payments', paymentsRouter);
 const materialsRouter = require('./routes/materials');
 app.use('/api/materials', materialsRouter);
 
+// More specific prefix registered before the general '/api/public' below --
+// Express Router falls through to the next app.use() on no match either
+// way, but registering specific-before-general avoids relying on that.
+const publicCampaignsRouter = require('./routes/public-campaigns');
+app.use('/api/public/campaigns', publicCampaignsRouter);
+
 const publicApiRouter = require('./routes/public-api');
 app.use('/api/public', publicApiRouter);
+
+const campaignsRouter = require('./routes/campaigns');
+app.use('/api/campaigns', requireAdmin, campaignsRouter);
 
 const programsRouter = require('./routes/programs');
 app.use('/api/programs', programsRouter);

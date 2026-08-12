@@ -896,6 +896,101 @@ async function checkDatabase() {
       )
     `);
 
+    // CAMPAIGN LINKS (eduskill-campaign-admin-prompt.md) -- one shareable
+    // landing/registration flow tied to one event/batch. `slug` is the URL
+    // identity and, per the spec, must never change once created (content
+    // is mutable, the link is not) -- there's no UPDATE path for it below.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        slug VARCHAR(100) NOT NULL UNIQUE,
+        name VARCHAR(200) NOT NULL,
+        college_id INT,
+        program_id INT,
+        course_id INT,
+        batch_id INT,
+        hero_tag VARCHAR(100),
+        headline VARCHAR(255),
+        subheading TEXT,
+        feedback_enabled BOOLEAN DEFAULT TRUE,
+        counselor_toggle_enabled BOOLEAN DEFAULT TRUE,
+        confirmation_template TEXT,
+        starts_at DATETIME,
+        ends_at DATETIME,
+        status ENUM('active', 'paused') DEFAULT 'active',
+        view_count INT DEFAULT 0,
+        registration_starts_count INT DEFAULT 0,
+        created_by_admin_id INT,
+        created_by_email VARCHAR(150),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE SET NULL,
+        FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE SET NULL,
+        FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL,
+        FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL
+      )
+    `);
+
+    // Self-hosted short link -> campaign slug (section 2's "shortened
+    // version of the link"). Deliberately its own table rather than a
+    // column, so a campaign's short code can be regenerated without
+    // touching the campaign row.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS campaign_short_links (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        code VARCHAR(20) NOT NULL UNIQUE,
+        campaign_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Benefit cards -- addable/removable/reorderable, not a fixed count.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS campaign_benefits (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        campaign_id INT NOT NULL,
+        icon VARCHAR(20),
+        title VARCHAR(150) NOT NULL,
+        description TEXT,
+        order_no INT DEFAULT 0,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+      )
+    `);
+
+    // "Interest" chips for the feedback step -- editable per campaign since
+    // an AI/ML session and a Web Dev session shouldn't share defaults.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS campaign_interests (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        campaign_id INT NOT NULL,
+        label VARCHAR(100) NOT NULL,
+        order_no INT DEFAULT 0,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+      )
+    `);
+
+    // One row per completed registration through a campaign link. Deliberately
+    // NOT a parallel student record -- student_id points at the same
+    // `students` table every other registration path uses (main dev prompt's
+    // "beyond v1" note: campaign data must not become a disconnected silo).
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS campaign_registrations (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        campaign_id INT NOT NULL,
+        student_id INT NOT NULL,
+        feedback_rating INT,
+        selected_interests JSON,
+        counselor_opt_in BOOLEAN DEFAULT FALSE,
+        contacted BOOLEAN DEFAULT FALSE,
+        feedback_submitted_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_campaign_student (campaign_id, student_id)
+      )
+    `);
+
     console.log('🔄 Inserting default colleges...');
     await connection.query(`
       INSERT IGNORE INTO colleges (id, name, district_id) VALUES
