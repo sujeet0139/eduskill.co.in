@@ -421,6 +421,18 @@ async function checkDatabase() {
     
     await connection.query(`CREATE TABLE IF NOT EXISTS settings (id INT PRIMARY KEY AUTO_INCREMENT, setting_key VARCHAR(100) UNIQUE NOT NULL, setting_value TEXT)`);
 
+    // 11b. REGISTRATION FAILURES — diagnostic log for failed student
+    // registration / add-student submissions (dev-prompt Priority 0 #1).
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS registration_failures (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        source VARCHAR(50) NOT NULL,
+        payload_json TEXT,
+        error_message VARCHAR(1000),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // 12. LIVE CLASSES
     await connection.query(`
       CREATE TABLE IF NOT EXISTS live_classes (

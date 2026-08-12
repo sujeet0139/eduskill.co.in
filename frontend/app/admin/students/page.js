@@ -243,7 +243,7 @@ export default function AdminStudents() {
     if (!importRows.length) return;
     setImportBusy(true);
     try {
-      const res = await api.post("/api/students/bulk-import", { students: importRows }, token());
+      const res = await api.post("/api/students/bulk-import", { students: importRows }, token(), { timeoutMs: 60000 });
       setImportResult(res);
       load();
     } catch (err) {
@@ -419,7 +419,12 @@ export default function AdminStudents() {
               </div>
             ) : (
               <form onSubmit={submitAdd} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {addError && <div className="sm:col-span-2"><Alert type="error">{addError}</Alert></div>}
+                {addError && (
+                  <div className="sm:col-span-2">
+                    <Alert type="error">{addError}</Alert>
+                    <p className="mt-1 text-xs text-gray-500">Nothing was saved — your entries above are unchanged. Fix the issue if needed and try again.</p>
+                  </div>
+                )}
                 <Input label="Name *" name="name" value={addForm.name} onChange={changeAdd} required />
                 <Input label="Email *" type="email" name="email" value={addForm.email} onChange={changeAdd} required />
                 <Input label="Phone" name="phone" value={addForm.phone} onChange={changeAdd} maxLength={10} placeholder="10-digit mobile" />
@@ -435,7 +440,7 @@ export default function AdminStudents() {
                 <div className="flex items-end text-xs text-gray-500">Leave password blank and we&apos;ll generate one to share.</div>
                 <div className="flex justify-end gap-2 sm:col-span-2">
                   <button type="button" onClick={() => setAdding(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
-                  <Button type="submit" loading={addSaving}>Add Student</Button>
+                  <Button type="submit" loading={addSaving}>{addError ? "Retry" : "Add Student"}</Button>
                 </div>
               </form>
             )}

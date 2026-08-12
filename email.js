@@ -40,6 +40,13 @@ async function getTransport() {
     port: cfg.port,
     secure: cfg.port === 465,
     auth: { user: cfg.user, pass: cfg.pass },
+    // Without these, a slow/unreachable SMTP host has no timeout at all and
+    // callers that `await` an email send (registration, add-student, payment
+    // confirmation) hang indefinitely instead of failing fast. Keep these
+    // comfortably under the 15s client-side request timeout.
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 12000,
   });
   return { transporter, from: `"${cfg.fromName}" <${cfg.fromEmail}>` };
 }

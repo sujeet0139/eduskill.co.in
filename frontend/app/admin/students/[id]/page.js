@@ -39,6 +39,7 @@ export default function StudentProfilePage() {
   const loadProfile = () => {
     if (!studentId) return;
     setLoading(true);
+    setError("");
     api.get(`/api/students/${studentId}/full-profile`, token())
       .then((res) => setProfile(res.profile))
       .catch((err) => setError("Failed to load student profile: " + err.message))
@@ -88,10 +89,18 @@ export default function StudentProfilePage() {
   };
 
   if (loading) return <div className="p-6">Loading student profile...</div>;
-  if (error) return <Alert type="error">{error}</Alert>;
+  if (error) return (
+    <div className="space-y-3 p-6">
+      <Alert type="error">{error}</Alert>
+      <div className="flex gap-2">
+        <Button onClick={loadProfile}>Retry</Button>
+        <Link href="/admin/students"><Button className="bg-gray-600 hover:bg-gray-700">← Back to list</Button></Link>
+      </div>
+    </div>
+  );
   if (!profile) return <Alert type="error">Student not found.</Alert>;
 
-  const { basic, financial, learning, internships } = profile;
+  const { basic, financial, learning, internships, warnings } = profile;
 
   const TABS = [
     { id: "profile", label: "Profile", icon: User },
@@ -112,6 +121,12 @@ export default function StudentProfilePage() {
           </div>
         }
       />
+
+      {warnings && warnings.length > 0 && (
+        <Alert type="info">
+          Some sections couldn&apos;t be loaded ({warnings.join(", ")}) — the rest of this profile is showing normally. Try refreshing, or check the server logs if it persists.
+        </Alert>
+      )}
 
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex space-x-6">

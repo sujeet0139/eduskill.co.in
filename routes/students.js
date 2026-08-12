@@ -5,13 +5,15 @@ const { sendWelcomeEmail } = require('../email');
 const bcrypt = require('bcryptjs');
 const { requireAdmin } = require('../middleware/authMiddleware');
 const { validateStudentFields, normalizeMobile, isValidPan } = require('../lib/validators');
+const { logRegistrationFailure } = require('../lib/failureLog');
 
 // STUDENT REGISTRATION ENDPOINT
 router.post('/register', async (req, res) => {
   const studentData = req.body;
+  let connection;
 
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
 
     // Fetch dynamic field validation rules
     const [fields] = await connection.query('SELECT * FROM registration_fields WHERE is_enabled = TRUE');
@@ -19,15 +21,12 @@ router.post('/register', async (req, res) => {
     // Dynamic Validation
     for (const field of fields) {
       if (field.is_mandatory && !studentData[field.field_name]) {
-        connection.release();
         return res.status(400).json({ error: `${field.label} is a required field.` });
       }
       if (field.field_name === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(studentData.email)) {
-        connection.release();
         return res.status(400).json({ error: 'Invalid email format.' });
       }
       if (field.field_name === 'password' && (!studentData.password || studentData.password.length < 6)) {
-        connection.release();
         return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
       }
     }
@@ -35,7 +34,6 @@ router.post('/register', async (req, res) => {
     // Format validation for mobile / aadhar / pan (email handled above).
     const fmtErr = validateStudentFields(studentData);
     if (fmtErr) {
-      connection.release();
       return res.status(400).json({ error: fmtErr });
     }
     // Normalize stored values so lookups & display are consistent.
@@ -49,7 +47,6 @@ router.post('/register', async (req, res) => {
     );
 
     if (existingEmail.length > 0) {
-      connection.release();
       return res.status(400).json({ error: 'Email already registered' });
     }
 
@@ -68,7 +65,7 @@ router.post('/register', async (req, res) => {
     const customFields = fields.filter(f => !f.is_standard);
 
     const [result] = await connection.query(
-      `INSERT INTO students (enrollment_id, reference_no, name, email, password_hash, phone, aadhar, pan, roll_number, current_year, college_id, department, status) 
+      `INSERT INTO students (enrollment_id, reference_no, name, email, password_hash, phone, aadhar, pan, roll_number, current_year, college_id, department, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [enrollmentId, referenceNo, studentData.name, studentData.email, passwordHash, studentData.phone, studentData.aadhar || null, studentData.pan || null, studentData.roll_number || null, studentData.current_year || 1, studentData.collegeId, studentData.department, 'registered']
     );
@@ -81,17 +78,12 @@ router.post('/register', async (req, res) => {
         await connection.query('INSERT INTO student_custom_fields (student_id, field_id, value) VALUES (?, ?, ?)', [studentId, customField.id, value]);
       }
     }
-    
-    connection.release();
 
-    // SEND CONFIRMATION EMAIL
-    try {
-      // Use the centralized email function
-      await sendWelcomeEmail(studentData.email, studentData.name, referenceNo);
-    } catch (emailErr) {
-      console.error('Email sending failed:', emailErr);
-      // We log the error but don't fail the whole registration if email fails
-    }
+    // SEND CONFIRMATION EMAIL — fire-and-forget. Registration must never hang
+    // waiting on a slow/unreachable SMTP server (this was the root cause of
+    // the "please wait forever" hang — see email.js for the added timeouts).
+    sendWelcomeEmail(studentData.email, studentData.name, referenceNo)
+      .catch((emailErr) => console.error('Email sending failed:', emailErr.message));
 
     res.status(201).json({
       success: true,
@@ -104,22 +96,26 @@ router.post('/register', async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error);
+    logRegistrationFailure('public_register', studentData, error);
     res.status(500).json({ error: 'Registration failed', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET ALL STUDENTS (ADMIN)
 router.get('/', requireAdmin, async (req, res) => {
   const { district, collegeId, status, paymentStatus } = req.query;
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
+    connection = await pool.getConnection();
+
     let query = `
       SELECT s.*, c.name as college_name, d.name as district_name,
              (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = 'completed') as total_paid
-      FROM students s 
-      LEFT JOIN colleges c ON s.college_id = c.id 
-      LEFT JOIN districts d ON c.district_id = d.id 
+      FROM students s
+      LEFT JOIN colleges c ON s.college_id = c.id
+      LEFT JOIN districts d ON c.district_id = d.id
       WHERE 1=1
     `;
     const params = [];
@@ -127,7 +123,7 @@ router.get('/', requireAdmin, async (req, res) => {
     if (district) { query += ' AND d.id = ?'; params.push(district); }
     if (collegeId) { query += ' AND c.id = ?'; params.push(collegeId); }
     if (status) { query += ' AND s.status = ?'; params.push(status); }
-    
+
     if (paymentStatus === 'paid') {
       query += ' AND (SELECT SUM(amount) FROM payments WHERE student_id = s.id AND status = "completed") > 0';
     } else if (paymentStatus === 'unpaid') {
@@ -137,7 +133,6 @@ router.get('/', requireAdmin, async (req, res) => {
     query += ' ORDER BY s.created_at DESC';
 
     const [students] = await connection.query(query, params);
-    connection.release();
 
     res.json({
       success: true,
@@ -146,14 +141,17 @@ router.get('/', requireAdmin, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // EXPORT STUDENTS AS CSV
 router.get('/export', requireAdmin, async (req, res) => {
   const { q, status, collegeId } = req.query;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     let query = `
       SELECT s.id, s.enrollment_id, s.reference_no, s.name, s.email, s.phone, c.name as college_name, s.status, s.created_at
       FROM students s
@@ -186,7 +184,6 @@ router.get('/export', requireAdmin, async (req, res) => {
 
     query += ' ORDER BY s.created_at DESC';
     const [students] = await connection.query(query, params);
-    connection.release();
 
     const csvRows = [
       [
@@ -222,69 +219,102 @@ router.get('/export', requireAdmin, async (req, res) => {
     res.send(csvData);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET FULL STUDENT PROFILE (Basic, Financial, Learning, Internship)
+//
+// Only the "basic" lookup is treated as fatal (404 if the student doesn't
+// exist). Every other section is fetched independently via Promise.allSettled
+// so a failure in one (e.g. a stale join, a locked table) degrades that one
+// section instead of blanking the whole profile — this was a real gap: any
+// single query throwing here previously failed the entire page with no way
+// to tell which part broke, and (separately, see the connection-leak fix
+// below) never released its DB connection either.
 router.get('/:id/full-profile', requireAdmin, async (req, res) => {
   const studentId = req.params.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    
-    // Basic details
+    connection = await pool.getConnection();
+
+    // Basic details — the one query that must succeed.
     const [[basic]] = await connection.query(`
-      SELECT s.*, c.name as college_name, d.name as district_name 
-      FROM students s LEFT JOIN colleges c ON s.college_id = c.id LEFT JOIN districts d ON c.district_id = d.id 
+      SELECT s.*, c.name as college_name, d.name as district_name
+      FROM students s LEFT JOIN colleges c ON s.college_id = c.id LEFT JOIN districts d ON c.district_id = d.id
       WHERE s.id = ?`, [studentId]);
-    
+
     if (!basic) {
-      connection.release();
       return res.status(404).json({ error: 'Student not found' });
     }
 
-    // Financials
-    const [[financial]] = await connection.query(`SELECT SUM(amount) as total_paid FROM payments WHERE student_id = ? AND status = 'completed'`, [studentId]);
-    const [payments] = await connection.query(`SELECT * FROM payments WHERE student_id = ? ORDER BY created_at DESC`, [studentId]);
+    const sections = await Promise.allSettled([
+      connection.query(`SELECT SUM(amount) as total_paid FROM payments WHERE student_id = ? AND status = 'completed'`, [studentId]),
+      connection.query(`SELECT * FROM payments WHERE student_id = ? ORDER BY created_at DESC`, [studentId]),
+      connection.query(`SELECT sc.*, c.title FROM student_courses sc JOIN courses c ON sc.course_id = c.id WHERE sc.student_id = ?`, [studentId]),
+      connection.query(`SELECT COUNT(*) as attended_classes FROM class_attendance WHERE student_id = ? AND status = 'present'`, [studentId]),
+      connection.query(`SELECT * FROM assignment_submissions WHERE student_id = ?`, [studentId]),
+      connection.query(`SELECT * FROM student_documents WHERE student_id = ?`, [studentId]),
+      connection.query(`SELECT * FROM certificates WHERE student_id = ?`, [studentId]),
+      connection.query(`
+        SELECT rf.label, rf.field_name, scf.value
+        FROM student_custom_fields scf
+        JOIN registration_fields rf ON scf.field_id = rf.id
+        WHERE scf.student_id = ?`, [studentId]),
+      connection.query(`SELECT sp.*, p.title as program_title FROM student_programs sp JOIN programs p ON sp.program_id = p.id WHERE sp.student_id = ?`, [studentId]),
+    ]);
 
-    // Learning Path
-    const [courses] = await connection.query(`SELECT sc.*, c.title FROM student_courses sc JOIN courses c ON sc.course_id = c.id WHERE sc.student_id = ?`, [studentId]);
-    const [[attendance]] = await connection.query(`SELECT COUNT(*) as attended_classes FROM class_attendance WHERE student_id = ? AND status = 'present'`, [studentId]);
-    const [assignments] = await connection.query(`SELECT * FROM assignment_submissions WHERE student_id = ?`, [studentId]);
-    const [documents] = await connection.query(`SELECT * FROM student_documents WHERE student_id = ?`, [studentId]);
-    const [certificates] = await connection.query(`SELECT * FROM certificates WHERE student_id = ?`, [studentId]);
-    const [customFields] = await connection.query(`
-      SELECT rf.label, rf.field_name, scf.value 
-      FROM student_custom_fields scf 
-      JOIN registration_fields rf ON scf.field_id = rf.id 
-      WHERE scf.student_id = ?`, [studentId]
-    );
+    const warnings = [];
+    const rowsOf = (result, label, fallback) => {
+      if (result.status === 'fulfilled') return result.value[0];
+      console.error(`full-profile: ${label} query failed for student ${studentId}:`, result.reason.message);
+      warnings.push(label);
+      return fallback;
+    };
+    const [
+      totalPaidRows, paymentsRows, coursesRows, attendanceRows,
+      assignmentsRows, documentsRows, certificatesRows, customFieldsRows, internshipsRows,
+    ] = sections;
 
-    // Internships
-    const [internships] = await connection.query(`SELECT sp.*, p.title as program_title FROM student_programs sp JOIN programs p ON sp.program_id = p.id WHERE sp.student_id = ?`, [studentId]);
+    const financialTotal = rowsOf(totalPaidRows, 'financial_total', [{ total_paid: 0 }])[0];
+    const payments = rowsOf(paymentsRows, 'payments', []);
+    const courses = rowsOf(coursesRows, 'courses', []);
+    const attendance = rowsOf(attendanceRows, 'attendance', [{ attended_classes: 0 }])[0];
+    const assignments = rowsOf(assignmentsRows, 'assignments', []);
+    const documents = rowsOf(documentsRows, 'documents', []);
+    const certificates = rowsOf(certificatesRows, 'certificates', []);
+    const customFields = rowsOf(customFieldsRows, 'customFields', []);
+    const internships = rowsOf(internshipsRows, 'internships', []);
 
-    connection.release();
-    
     res.json({
       success: true,
       profile: {
         basic,
-        financial: { wallet_balance: basic.wallet_balance, total_paid: financial.total_paid || 0, payments },
+        financial: { wallet_balance: basic.wallet_balance, total_paid: financialTotal.total_paid || 0, payments },
         learning: { courses, attended_classes: attendance.attended_classes, assignments, certificates, documents, customFields },
-        internships
+        internships,
+        // Non-fatal — lets the admin panel show "some details couldn't load"
+        // instead of silently rendering zeros/empties as if that were real data.
+        warnings: warnings.length ? warnings : undefined,
       }
     });
   } catch (error) {
+    console.error('full-profile error:', error);
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // GET /api/students/:id/id-card - Data for generating a student ID card
 router.get('/:id/id-card', requireAdmin, async (req, res) => {
   const studentId = req.params.id;
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[student]] = await connection.query(`
-      SELECT 
+      SELECT
         s.name, s.enrollment_id, s.dob, s.father_name, s.phone, s.address_permanent,
         c.name as college_name,
         (SELECT file_url FROM student_documents WHERE student_id = s.id AND document_type = 'photo' AND status = 'verified' LIMIT 1) as photo_url,
@@ -293,7 +323,6 @@ router.get('/:id/id-card', requireAdmin, async (req, res) => {
       LEFT JOIN colleges c ON s.college_id = c.id
       WHERE s.id = ?
     `, [studentId]);
-    connection.release();
 
     if (!student) {
       return res.status(404).json({ error: 'Student not found' });
@@ -302,6 +331,8 @@ router.get('/:id/id-card', requireAdmin, async (req, res) => {
     res.json({ success: true, idCardData: student });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -322,14 +353,16 @@ router.post('/upload-document', docUpload.single('document'), async (req, res) =
     return res.status(400).json({ error: 'Student ID, document type, and a file are required.' });
   }
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const fileUrl = require('../config/storage').fileUrl(file);
     await connection.query('INSERT INTO student_documents (student_id, document_type, file_url, file_name) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE file_url = VALUES(file_url), file_name = VALUES(file_name), status = "pending_verification"', [student_id, document_type, fileUrl, file.originalname]);
-    connection.release();
     res.json({ success: true, message: 'Document uploaded successfully. It will be reviewed by our team.' });
   } catch (error) {
     res.status(500).json({ error: 'Document upload failed', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -342,56 +375,64 @@ router.put('/documents/:docId/status', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Invalid status provided.' });
   }
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('UPDATE student_documents SET status = ?, notes = ? WHERE id = ?', [status, notes || null, docId]);
-    connection.release();
     res.json({ success: true, message: `Document status updated to ${status}.` });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update document status', message: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // UPDATE STUDENT
 router.put('/:id', requireAdmin, async (req, res) => {
   const { name, email, phone, collegeId, department, status, roll_number, current_year, wallet_balance } = req.body;
+  let connection;
   try {
     const fmtErr = validateStudentFields({ email, phone });
     if (fmtErr) return res.status(400).json({ error: fmtErr });
     const normPhone = phone ? normalizeMobile(phone) : phone;
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query(
       'UPDATE students SET name=?, email=?, phone=?, college_id=?, department=?, status=?, roll_number=?, current_year=?, wallet_balance=? WHERE id=?',
       [name, email, normPhone, collegeId, department, status, roll_number, current_year, wallet_balance, req.params.id]
     );
-    connection.release();
     res.json({ success: true, message: 'Student updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // DELETE STUDENT
 router.delete('/:id', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('DELETE FROM students WHERE id=?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Student deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // VERIFY STUDENT
 router.put('/:id/verify', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('UPDATE students SET status="verified" WHERE id=?', [req.params.id]);
-    connection.release();
     res.json({ success: true, message: 'Student verified successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -399,26 +440,29 @@ router.put('/:id/verify', requireAdmin, async (req, res) => {
 router.post('/bulk-verify', requireAdmin, async (req, res) => {
   const { ids } = req.body;
   if (!ids || !ids.length) return res.status(400).json({ error: 'No IDs provided' });
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     await connection.query('UPDATE students SET status="verified" WHERE id IN (?)', [ids]);
-    connection.release();
     res.json({ success: true, message: 'Students verified successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // BULK IMPORT STUDENTS (CSV/JSON Array)
 router.post('/bulk-import', requireAdmin, async (req, res) => {
   const { students } = req.body; // Expects array of objects
-  
+
   if (!students || !Array.isArray(students)) {
     return res.status(400).json({ error: 'Invalid payload. Expected an array of student objects.' });
   }
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     let imported = 0;
     let errors = [];
 
@@ -429,7 +473,7 @@ router.post('/bulk-import', requireAdmin, async (req, res) => {
         if (fmtErr) { errors.push({ email: st.email, error: fmtErr }); continue; }
         if (st.phone) st.phone = normalizeMobile(st.phone);
         await connection.query(
-          `INSERT INTO students (reference_no, name, email, phone, roll_number, current_year, college_id, department) 
+          `INSERT INTO students (reference_no, name, email, phone, roll_number, current_year, college_id, department)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [ref, st.name, st.email, st.phone, st.roll_number || null, st.current_year || 1, st.college_id, st.department || null]
         );
@@ -438,10 +482,11 @@ router.post('/bulk-import', requireAdmin, async (req, res) => {
         errors.push({ email: st.email, error: err.message });
       }
     }
-    connection.release();
     res.json({ success: true, message: `Successfully imported ${imported} students`, errors: errors.length > 0 ? errors : undefined });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -460,7 +505,6 @@ router.post('/', requireAdmin, async (req, res) => {
     connection = await pool.getConnection();
     const [existing] = await connection.query('SELECT id FROM students WHERE email = ?', [email]);
     if (existing.length > 0) {
-      connection.release();
       return res.status(400).json({ error: 'Email already registered' });
     }
 
@@ -481,9 +525,11 @@ router.post('/', requireAdmin, async (req, res) => {
        aadhar || null, pan ? String(pan).toUpperCase() : null, roll_number || null, current_year || 1,
        collegeId || null, department || null]
     );
-    connection.release();
 
-    try { await sendWelcomeEmail(email, name, referenceNo); } catch (e) { /* non-fatal */ }
+    // Fire-and-forget — never let a slow/unreachable SMTP server delay this
+    // response (was the root cause of "Add Student" hanging on "please wait").
+    sendWelcomeEmail(email, name, referenceNo)
+      .catch((e) => console.error('Welcome email failed:', e.message));
 
     res.status(201).json({
       success: true,
@@ -495,15 +541,19 @@ router.post('/', requireAdmin, async (req, res) => {
       tempPassword: req.body.password ? undefined : tempPassword,
     });
   } catch (error) {
-    if (connection) connection.release();
+    console.error('Add student error:', error);
+    logRegistrationFailure('admin_add_student', req.body, error);
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // ADMIN: LIST A STUDENT'S ENROLLMENTS (courses + programs, with batch & status)
 router.get('/:id/enrollments', requireAdmin, async (req, res) => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [courses] = await connection.query(
       `SELECT sc.course_id AS item_id, c.title, sc.batch_id, b.name AS batch_name, sc.status, sc.enrolled_at
        FROM student_courses sc JOIN courses c ON c.id = sc.course_id
@@ -514,10 +564,11 @@ router.get('/:id/enrollments', requireAdmin, async (req, res) => {
        FROM student_programs sp JOIN programs p ON p.id = sp.program_id
        LEFT JOIN batches b ON b.id = sp.batch_id
        WHERE sp.student_id = ? ORDER BY sp.enrolled_at DESC`, [req.params.id]);
-    connection.release();
     res.json({ success: true, courses, programs });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -549,11 +600,11 @@ router.post('/:id/enroll', requireAdmin, async (req, res) => {
       if (oldBatch) await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [oldBatch]);
       if (newBatch) await connection.query('UPDATE batches SET current_enrolled = current_enrolled + 1 WHERE id = ?', [newBatch]);
     }
-    connection.release();
     res.json({ success: true, message: existing ? 'Enrollment updated.' : 'Student enrolled.' });
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -574,11 +625,11 @@ router.delete('/:id/enroll', requireAdmin, async (req, res) => {
     if (existing && existing.batch_id) {
       await connection.query('UPDATE batches SET current_enrolled = GREATEST(current_enrolled - 1, 0) WHERE id = ?', [existing.batch_id]);
     }
-    connection.release();
     res.json({ success: true, message: 'Student unenrolled.' });
   } catch (error) {
-    if (connection) connection.release();
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -593,13 +644,13 @@ router.put('/:id/set-password', requireAdmin, async (req, res) => {
   }
   if (!password) password = Math.random().toString(36).slice(-8);
 
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const [[student]] = await connection.query('SELECT id, email, name FROM students WHERE id = ?', [req.params.id]);
-    if (!student) { connection.release(); return res.status(404).json({ error: 'Student not found.' }); }
+    if (!student) { return res.status(404).json({ error: 'Student not found.' }); }
     const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
     await connection.query('UPDATE students SET password_hash = ? WHERE id = ?', [passwordHash, req.params.id]);
-    connection.release();
     res.json({
       success: true,
       message: 'Password updated successfully.',
@@ -609,6 +660,8 @@ router.put('/:id/set-password', requireAdmin, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -621,8 +674,9 @@ router.post('/:id/photo', requireAdmin, docUpload.single('document'), async (req
   if (!['photo', 'signature'].includes(document_type)) {
     return res.status(400).json({ error: 'document_type must be "photo" or "signature".' });
   }
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const url = require('../config/storage').fileUrl(file);
     await connection.query(
       `INSERT INTO student_documents (student_id, document_type, file_url, file_name, status)
@@ -630,10 +684,11 @@ router.post('/:id/photo', requireAdmin, docUpload.single('document'), async (req
        ON DUPLICATE KEY UPDATE file_url = VALUES(file_url), file_name = VALUES(file_name), status = 'verified'`,
       [req.params.id, document_type, url, file.originalname]
     );
-    connection.release();
     res.json({ success: true, message: 'Photo uploaded successfully.', url });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
