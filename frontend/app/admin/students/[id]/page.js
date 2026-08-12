@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Card, StatusBadge, Alert, Select } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td } from "@/components/admin";
-import { User, Banknote, BookOpen, FileText } from "lucide-react";
+import { User, Banknote, BookOpen, FileText, GraduationCap } from "lucide-react";
 import { useToast } from "@/components/Toast";
 
 const DetailItem = ({ label, value, children }) => (
@@ -32,6 +32,20 @@ export default function StudentProfilePage() {
   const [allBatches, setAllBatches] = useState([]);
   const [newCourse, setNewCourse] = useState({ item_id: "", batch_id: "" });
   const [newProgram, setNewProgram] = useState({ item_id: "", batch_id: "" });
+
+  // Expanded profile fields (item #12) — inline edit form, only sends the
+  // fields on this form so it can never wipe unrelated columns (see the
+  // partial-update PUT /:id on the backend).
+  const [editingExtra, setEditingExtra] = useState(false);
+  const [extraForm, setExtraForm] = useState({});
+  const [extraSaving, setExtraSaving] = useState(false);
+  const [extraError, setExtraError] = useState("");
+
+  // Educational background (item #13)
+  const [eduForm, setEduForm] = useState({ level: "10th", board_university: "", stream: "", degree_name: "", institution: "", year_of_passing: "", percentage_or_cgpa: "" });
+  const [eduFile, setEduFile] = useState(null);
+  const [eduSaving, setEduSaving] = useState(false);
+  const [eduError, setEduError] = useState("");
 
   const token = () => adminAuth.token();
   const notify = useToast();
@@ -88,6 +102,64 @@ export default function StudentProfilePage() {
     }
   };
 
+  const openEditExtra = (basic) => {
+    setExtraError("");
+    setExtraForm({
+      dob: basic.dob ? String(basic.dob).slice(0, 10) : "",
+      gender: basic.gender || "",
+      blood_group: basic.blood_group || "",
+      emergency_contact_name: basic.emergency_contact_name || "",
+      emergency_contact_phone: basic.emergency_contact_phone || "",
+      linkedin_url: basic.linkedin_url || "",
+      github_url: basic.github_url || "",
+      employment_status: basic.employment_status || "",
+      referral_source: basic.referral_source || "",
+    });
+    setEditingExtra(true);
+  };
+  const saveExtra = async (e) => {
+    e.preventDefault();
+    setExtraSaving(true);
+    setExtraError("");
+    try {
+      await api.put(`/api/students/${studentId}`, extraForm, token());
+      setEditingExtra(false);
+      loadProfile();
+    } catch (err) {
+      setExtraError(err.message);
+    } finally {
+      setExtraSaving(false);
+    }
+  };
+
+  const addEducation = async (e) => {
+    e.preventDefault();
+    setEduSaving(true);
+    setEduError("");
+    try {
+      const fd = new FormData();
+      Object.entries(eduForm).forEach(([k, v]) => fd.append(k, v));
+      if (eduFile) fd.append("certificate", eduFile);
+      await api.postForm(`/api/students/${studentId}/education`, fd, token());
+      setEduForm({ level: "10th", board_university: "", stream: "", degree_name: "", institution: "", year_of_passing: "", percentage_or_cgpa: "" });
+      setEduFile(null);
+      loadProfile();
+    } catch (err) {
+      setEduError(err.message);
+    } finally {
+      setEduSaving(false);
+    }
+  };
+  const removeEducation = async (eduId) => {
+    if (!(await notify.confirm("Remove this education record?"))) return;
+    try {
+      await api.del(`/api/students/${studentId}/education/${eduId}`, token());
+      loadProfile();
+    } catch (err) {
+      notify.error(err.message);
+    }
+  };
+
   if (loading) return <div className="p-6">Loading student profile...</div>;
   if (error) return (
     <div className="space-y-3 p-6">
@@ -100,10 +172,11 @@ export default function StudentProfilePage() {
   );
   if (!profile) return <Alert type="error">Student not found.</Alert>;
 
-  const { basic, financial, learning, internships, warnings } = profile;
+  const { basic, financial, learning, internships, education, warnings } = profile;
 
   const TABS = [
     { id: "profile", label: "Profile", icon: User },
+    { id: "education", label: "Education", icon: GraduationCap },
     { id: "payments", label: "Payments", icon: Banknote },
     { id: "courses", label: "Enrollments", icon: BookOpen },
     { id: "documents", label: "Documents", icon: FileText },
@@ -113,7 +186,17 @@ export default function StudentProfilePage() {
     <>
       <PageHeader
         title={basic.name}
-        subtitle={`Enrollment ID: ${basic.enrollment_id || "—"} | ${basic.college_name || ""}`}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            {`Enrollment ID: ${basic.enrollment_id || "—"} | ${basic.college_name || ""}`}
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${basic.enrollment_status === "enrolled" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-700"}`}>
+              {basic.enrollment_status === "enrolled" ? "Enrolled" : "Guest"}
+            </span>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${basic.is_active === 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-800"}`}>
+              {basic.is_active === 0 ? "Inactive" : "Active"}
+            </span>
+          </span>
+        }
         action={
           <div className="flex gap-2">
             <Link href="/admin/students"><Button className="bg-gray-600 hover:bg-gray-700">← Back</Button></Link>
@@ -162,6 +245,146 @@ export default function StudentProfilePage() {
               <DetailItem label="Roll Number" value={basic.roll_number} />
               <DetailItem label="Registered On" value={basic.created_at ? new Date(basic.created_at).toLocaleDateString() : "—"} />
             </div>
+
+            <div className="mt-6 flex items-center justify-between border-t pt-4">
+              <h3 className="text-lg font-semibold">Additional Details</h3>
+              {!editingExtra && <button onClick={() => openEditExtra(basic)} className="text-sm font-medium text-brand hover:underline">Edit</button>}
+            </div>
+            {editingExtra ? (
+              <form onSubmit={saveExtra} className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                {extraError && <div className="md:col-span-3"><Alert type="error">{extraError}</Alert></div>}
+                <label className="block text-sm">Date of Birth
+                  <input type="date" value={extraForm.dob} onChange={(e) => setExtraForm({ ...extraForm, dob: e.target.value })}
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">Gender
+                  <select value={extraForm.gender} onChange={(e) => setExtraForm({ ...extraForm, gender: e.target.value })}
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 bg-white px-3 py-2 focus:border-brand focus:outline-none">
+                    <option value="">—</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="block text-sm">Blood Group
+                  <input value={extraForm.blood_group} onChange={(e) => setExtraForm({ ...extraForm, blood_group: e.target.value })} placeholder="O+"
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">Emergency Contact Name
+                  <input value={extraForm.emergency_contact_name} onChange={(e) => setExtraForm({ ...extraForm, emergency_contact_name: e.target.value })}
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">Emergency Contact Phone
+                  <input value={extraForm.emergency_contact_phone} onChange={(e) => setExtraForm({ ...extraForm, emergency_contact_phone: e.target.value })}
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">Employment Status
+                  <input value={extraForm.employment_status} onChange={(e) => setExtraForm({ ...extraForm, employment_status: e.target.value })} placeholder="Student / Employed / Unemployed"
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">LinkedIn URL
+                  <input value={extraForm.linkedin_url} onChange={(e) => setExtraForm({ ...extraForm, linkedin_url: e.target.value })}
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">GitHub URL
+                  <input value={extraForm.github_url} onChange={(e) => setExtraForm({ ...extraForm, github_url: e.target.value })}
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <label className="block text-sm">Referral Source
+                  <input value={extraForm.referral_source} onChange={(e) => setExtraForm({ ...extraForm, referral_source: e.target.value })} placeholder="How did they hear about EduSkill?"
+                    className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+                <div className="flex items-end gap-2 md:col-span-3">
+                  <button type="button" onClick={() => setEditingExtra(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                  <Button type="submit" loading={extraSaving}>Save</Button>
+                </div>
+              </form>
+            ) : (
+              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+                <DetailItem label="Date of Birth" value={basic.dob ? new Date(basic.dob).toLocaleDateString() : "—"} />
+                <DetailItem label="Gender" value={basic.gender} />
+                <DetailItem label="Blood Group" value={basic.blood_group} />
+                <DetailItem label="Emergency Contact" value={basic.emergency_contact_name ? `${basic.emergency_contact_name} (${basic.emergency_contact_phone || "—"})` : "—"} />
+                <DetailItem label="Employment Status" value={basic.employment_status} />
+                <DetailItem label="LinkedIn" value={basic.linkedin_url} />
+                <DetailItem label="GitHub" value={basic.github_url} />
+                <DetailItem label="Referral Source" value={basic.referral_source} />
+              </div>
+            )}
+          </Card>
+        )}
+
+        {activeTab === "education" && (
+          <Card>
+            <h3 className="mb-4 text-lg font-semibold">Educational Background</h3>
+            {education && education.length > 0 ? (
+              <div className="mb-4 space-y-2">
+                {education.map((ed) => (
+                  <div key={ed.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-100 p-3">
+                    <div className="min-w-[160px] flex-1">
+                      <p className="font-medium">{ed.level.toUpperCase()} — {ed.board_university || ed.degree_name || "—"}</p>
+                      <p className="text-xs text-gray-500">
+                        {[ed.institution, ed.stream, ed.year_of_passing, ed.percentage_or_cgpa].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    {ed.certificate_url && (
+                      <a href={api.mediaUrl(ed.certificate_url)} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline">View certificate</a>
+                    )}
+                    <button onClick={() => removeEducation(ed.id)} className="rounded bg-red-100 px-2 py-1 text-xs text-red-700 hover:bg-red-200">Remove</button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mb-4 text-sm text-gray-500">No education records yet.</p>
+            )}
+
+            <form onSubmit={addEducation} className="flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4">
+              {eduError && <div className="w-full"><Alert type="error">{eduError}</Alert></div>}
+              <label className="block text-sm">Level
+                <select value={eduForm.level} onChange={(e) => setEduForm({ ...eduForm, level: e.target.value })}
+                  className="mt-1 rounded-lg border-2 border-gray-200 bg-white px-3 py-2 focus:border-brand focus:outline-none">
+                  <option value="10th">10th</option>
+                  <option value="12th">12th</option>
+                  <option value="graduate">Graduate</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label className="block min-w-[160px] flex-1 text-sm">Board / University
+                <input value={eduForm.board_university} onChange={(e) => setEduForm({ ...eduForm, board_university: e.target.value })}
+                  className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+              </label>
+              {eduForm.level === "12th" && (
+                <label className="block text-sm">Stream
+                  <input value={eduForm.stream} onChange={(e) => setEduForm({ ...eduForm, stream: e.target.value })}
+                    className="mt-1 rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                </label>
+              )}
+              {(eduForm.level === "graduate" || eduForm.level === "other") && (
+                <>
+                  <label className="block min-w-[160px] flex-1 text-sm">Degree
+                    <input value={eduForm.degree_name} onChange={(e) => setEduForm({ ...eduForm, degree_name: e.target.value })}
+                      className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                  </label>
+                  <label className="block min-w-[160px] flex-1 text-sm">Institution
+                    <input value={eduForm.institution} onChange={(e) => setEduForm({ ...eduForm, institution: e.target.value })}
+                      className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+                  </label>
+                </>
+              )}
+              <label className="block w-24 text-sm">Year
+                <input type="number" value={eduForm.year_of_passing} onChange={(e) => setEduForm({ ...eduForm, year_of_passing: e.target.value })}
+                  className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+              </label>
+              <label className="block w-28 text-sm">%/CGPA
+                <input value={eduForm.percentage_or_cgpa} onChange={(e) => setEduForm({ ...eduForm, percentage_or_cgpa: e.target.value })}
+                  className="mt-1 w-full rounded-lg border-2 border-gray-200 px-3 py-2 focus:border-brand focus:outline-none" />
+              </label>
+              <label className="block text-sm">Certificate scan
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setEduFile(e.target.files?.[0] || null)}
+                  className="mt-1 block text-xs text-gray-600 file:mr-2 file:rounded-lg file:border-0 file:bg-brand file:px-2 file:py-1.5 file:text-white" />
+              </label>
+              <Button type="submit" loading={eduSaving}>Add</Button>
+            </form>
           </Card>
         )}
 

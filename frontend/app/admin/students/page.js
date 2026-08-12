@@ -56,13 +56,29 @@ function parseCsv(text) {
   });
 }
 
+const PAGE_SIZES = [25, 50, 100];
+
 export default function AdminStudents() {
   const [students, setStudents] = useState([]);
   const [colleges, setColleges] = useState([]);
+  const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
   const [exporting, setExporting] = useState(false);
+
+  // Search/filter/sort/pagination (dev-prompt items #15, #17) — all combine
+  // server-side, no page reload.
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [enrollmentStatusFilter, setEnrollmentStatusFilter] = useState("");
+  const [isActiveFilter, setIsActiveFilter] = useState("");
+  const [programFilter, setProgramFilter] = useState("");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState("desc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Edit modal state
   const [editing, setEditing] = useState(null); // student being edited (or null)
@@ -95,21 +111,51 @@ export default function AdminStudents() {
 
   const load = () => {
     setLoading(true);
-    api.get("/api/students", token())
-      .then((d) => setStudents(d.students || []))
+    setError("");
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sortBy, sortDir });
+    if (q) params.set("q", q);
+    if (statusFilter) params.set("status", statusFilter);
+    if (enrollmentStatusFilter) params.set("enrollmentStatus", enrollmentStatusFilter);
+    if (isActiveFilter) params.set("isActive", isActiveFilter);
+    if (programFilter) params.set("programId", programFilter);
+    api.get(`/api/students?${params.toString()}`, token())
+      .then((d) => {
+        setStudents(d.students || []);
+        setTotal(d.total || 0);
+        setTotalPages(d.totalPages || 1);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
+  // Re-fetch whenever a filter/sort/page control changes. Debounced only for
+  // free-text search so every keystroke doesn't fire a request.
   useEffect(() => {
-    load();
+    const t = setTimeout(load, q ? 350 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, statusFilter, enrollmentStatusFilter, isActiveFilter, programFilter, sortBy, sortDir, page, pageSize]);
+
+  // Any filter/search change (not page/pageSize itself) should jump back to
+  // page 1 -- otherwise "page 4 of 1" after narrowing a filter is confusing.
+  useEffect(() => { setPage(1); }, [q, statusFilter, enrollmentStatusFilter, isActiveFilter, programFilter]);
+
+  useEffect(() => {
     api.get("/api/colleges", token())
       .then((d) => setColleges(d.colleges || []))
+      .catch(() => {});
+    api.get("/api/programs", token())
+      .then((d) => setPrograms(d.programs || []))
       .catch(() => {});
   }, []);
 
   const verify = async (id) => {
     try { await api.put(`/api/students/${id}/verify`, {}, token()); load(); }
+    catch (e) { notify.error(e.message); }
+  };
+
+  const toggleActive = async (s) => {
+    try { await api.put(`/api/students/${s.id}/active-status`, { isActive: !s.is_active }, token()); load(); }
     catch (e) { notify.error(e.message); }
   };
 
@@ -268,21 +314,17 @@ export default function AdminStudents() {
     }
   };
 
-  const filtered = students.filter((s) =>
-    [s.name, s.email, s.reference_no, s.phone].join(" ").toLowerCase().includes(q.toLowerCase())
-  );
-
   const loginUrl = (typeof window !== "undefined" ? window.location.origin : "https://eduskill.co.in") + "/login";
 
   return (
     <>
       <PageHeader
         title="Students"
-        subtitle={`${students.length} registered`}
+        subtitle={`${total} registered`}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <input
-              placeholder="Search…"
+              placeholder="Search name / mobile / email…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
@@ -295,19 +337,60 @@ export default function AdminStudents() {
       />
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
+      {/* Filters — all combine via AND, no page reload (item #15) */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 bg-white px-2 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="">All statuses</option>
+          <option value="registered">Registered</option>
+          <option value="verified">Verified</option>
+          <option value="completed">Completed</option>
+        </select>
+        <select value={enrollmentStatusFilter} onChange={(e) => setEnrollmentStatusFilter(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 bg-white px-2 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="">Guest + Enrolled</option>
+          <option value="guest">Guest only</option>
+          <option value="enrolled">Enrolled only</option>
+        </select>
+        <select value={isActiveFilter} onChange={(e) => setIsActiveFilter(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 bg-white px-2 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="">Active + Inactive</option>
+          <option value="true">Active only</option>
+          <option value="false">Inactive only</option>
+        </select>
+        <select value={programFilter} onChange={(e) => setProgramFilter(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 bg-white px-2 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="">All programs</option>
+          {programs.map((p) => (<option key={p.id} value={p.id}>{p.title}</option>))}
+        </select>
+        <select value={`${sortBy}:${sortDir}`} onChange={(e) => { const [b, d] = e.target.value.split(":"); setSortBy(b); setSortDir(d); }}
+          className="rounded-lg border-2 border-gray-200 bg-white px-2 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="created_at:desc">Newest first</option>
+          <option value="created_at:asc">Oldest first</option>
+          <option value="name:asc">Name A-Z</option>
+          <option value="name:desc">Name Z-A</option>
+        </select>
+        {(statusFilter || enrollmentStatusFilter || isActiveFilter || programFilter || q) && (
+          <button
+            onClick={() => { setQ(""); setStatusFilter(""); setEnrollmentStatusFilter(""); setIsActiveFilter(""); setProgramFilter(""); }}
+            className="text-xs font-medium text-gray-500 hover:text-gray-800"
+          >Clear filters</button>
+        )}
+      </div>
+
       <TableWrap>
         <thead className="bg-gray-50">
           <tr>
-            <Th>Enroll ID</Th><Th>Ref</Th><Th>Name</Th><Th>Email</Th><Th>Phone</Th><Th>College</Th><Th>Status</Th><Th>Actions</Th>
+            <Th>Enroll ID</Th><Th>Ref</Th><Th>Name</Th><Th>Email</Th><Th>Phone</Th><Th>College</Th><Th>Status</Th><Th>Enrollment</Th><Th>Active</Th><Th>Actions</Th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {loading ? (
             <tr><Td className="text-gray-500">Loading…</Td></tr>
-          ) : filtered.length === 0 ? (
+          ) : students.length === 0 ? (
             <tr><Td className="text-gray-500">No students found.</Td></tr>
-          ) : filtered.map((s) => (
-            <tr key={s.id} className="hover:bg-gray-50">
+          ) : students.map((s) => (
+            <tr key={s.id} className={`hover:bg-gray-50 ${!s.is_active ? "opacity-60" : ""}`}>
               <Td className="font-mono text-xs">{s.enrollment_id || s.reference_no}</Td>
               <Td className="font-mono text-xs">{s.reference_no}</Td>
               <Td className="font-medium">
@@ -317,6 +400,20 @@ export default function AdminStudents() {
               <Td>{s.phone}</Td>
               <Td className="max-w-[180px] truncate">{s.college_name}</Td>
               <Td><StatusBadge status={s.status} /></Td>
+              <Td>
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${s.enrollment_status === "enrolled" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-700"}`}>
+                  {s.enrollment_status === "enrolled" ? "Enrolled" : "Guest"}
+                </span>
+              </Td>
+              <Td>
+                <button
+                  onClick={() => toggleActive(s)}
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${s.is_active === 0 ? "bg-red-100 text-red-700 hover:bg-red-200" : "bg-green-100 text-green-800 hover:bg-green-200"}`}
+                  title="Click to toggle"
+                >
+                  {s.is_active === 0 ? "Inactive" : "Active"}
+                </button>
+              </Td>
               <Td>
                 <div className="flex flex-wrap gap-1.5">
                   <button onClick={() => openEdit(s)} className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-700 hover:bg-blue-200">Edit</button>
@@ -344,6 +441,24 @@ export default function AdminStudents() {
           ))}
         </tbody>
       </TableWrap>
+
+      {/* Pagination (item #17) */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+        <div className="flex items-center gap-2">
+          <span>Showing {students.length ? (page - 1) * pageSize + 1 : 0}–{(page - 1) * pageSize + students.length} of {total}</span>
+          <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+            className="rounded-lg border-2 border-gray-200 bg-white px-2 py-1 text-sm focus:border-brand focus:outline-none">
+            {PAGE_SIZES.map((n) => (<option key={n} value={n}>{n} / page</option>))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="rounded-lg border-2 border-gray-200 px-3 py-1 disabled:opacity-40">Prev</button>
+          <span>Page {page} of {totalPages}</span>
+          <button disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="rounded-lg border-2 border-gray-200 px-3 py-1 disabled:opacity-40">Next</button>
+        </div>
+      </div>
 
       {/* EDIT STUDENT MODAL */}
       {editing && (
