@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
@@ -50,6 +51,9 @@ export default function AdminLoginPage() {
           />
           <Button type="submit" loading={loading} className="w-full">Sign In</Button>
         </form>
+        <p className="mt-4 text-center text-sm text-gray-500">
+          <Link href="/admin/forgot-password" className="font-medium text-brand hover:underline">Forgot password?</Link>
+        </p>
       </Card>
     </div>
   );

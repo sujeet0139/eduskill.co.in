@@ -205,6 +205,7 @@ export default function RegistrationSettingsPage() {
             <option value="tel">Phone Number</option>
             <option value="email">Email</option>
             <option value="select">Dropdown (Select)</option>
+            <option value="image">Image Upload</option>
           </Select>
           {newField.type === "select" && (
             <div>
@@ -241,6 +242,7 @@ export default function RegistrationSettingsPage() {
                   <option value="tel">Phone Number</option>
                   <option value="email">Email</option>
                   <option value="select">Dropdown (Select)</option>
+                  <option value="image">Image Upload</option>
                 </Select>
                 {editForm.type === "select" && (
                   <div>

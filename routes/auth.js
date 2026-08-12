@@ -240,6 +240,63 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// STAFF/ADMIN: FORGOT / RESET PASSWORD (item #30 -- students already had
+// this, admin_users didn't). Same pattern as the student flow above, just
+// against admin_users and pointing the emailed link at /admin/reset-password.
+router.post('/admin/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [[admin]] = await connection.query('SELECT id, email, name FROM admin_users WHERE email = ?', [email]);
+    if (admin) {
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+      const expiryDate = new Date(Date.now() + 3600000); // 1 hour
+      await connection.query(
+        'UPDATE admin_users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?',
+        [hashedToken, expiryDate, admin.id]
+      );
+      await sendPasswordResetEmail(admin.email, admin.name || 'Admin', resetToken, '/admin/reset-password');
+    }
+    res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to process request', message: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+router.post('/admin/reset-password', async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ error: 'Token and new password are required.' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+
+  let connection;
+  try {
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    connection = await pool.getConnection();
+    const [[admin]] = await connection.query(
+      'SELECT id FROM admin_users WHERE reset_token = ? AND reset_token_expiry > NOW()',
+      [hashedToken]
+    );
+    if (!admin) {
+      return res.status(400).json({ error: 'This reset link is invalid or has expired. Please request a new one.' });
+    }
+    const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    await connection.query(
+      'UPDATE admin_users SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL WHERE id = ?',
+      [passwordHash, admin.id]
+    );
+    res.json({ success: true, message: 'Password has been reset. You can now log in with your new password.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to reset password', message: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 // LOGOUT — clears the session cookie. Stateless JWTs can't be revoked
 // server-side, so this just removes the cookie from the browser.
 router.post('/logout', (req, res) => {

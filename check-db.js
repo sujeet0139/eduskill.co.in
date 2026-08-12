@@ -293,6 +293,10 @@ async function checkDatabase() {
         INDEX idx_email (email)
       )
     `);
+    // Staff/admin forgot-password (item #30) -- students already had this,
+    // admin_users didn't.
+    await runAlterIfMissing('admin_users', 'reset_token', "ALTER TABLE admin_users ADD COLUMN reset_token VARCHAR(255)");
+    await runAlterIfMissing('admin_users', 'reset_token_expiry', "ALTER TABLE admin_users ADD COLUMN reset_token_expiry DATETIME");
 
     // 5. STUDY MATERIALS TABLE
     await connection.query(`

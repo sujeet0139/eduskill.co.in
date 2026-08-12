@@ -116,9 +116,9 @@ async function sendPaymentConfirmationEmail(studentEmail, studentName, paymentDe
   }
 }
 
-async function sendPasswordResetEmail(studentEmail, studentName, resetToken) {
+async function sendPasswordResetEmail(studentEmail, studentName, resetToken, resetPath = '/reset-password') {
   try {
-    const resetUrl = `${process.env.FRONTEND_URL || 'https://eduskill.co.in'}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://eduskill.co.in'}${resetPath}?token=${resetToken}`;
     await send(studentEmail, 'Password Reset Request - EduSkill', `
       <h2>Hi ${studentName},</h2>
       <p>A password reset was requested for your account.</p>
