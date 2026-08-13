@@ -2,7 +2,14 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
-const { requireAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin, requireRole } = require('../middleware/authMiddleware');
+
+// Managing other admin accounts (creating one, changing role/active status,
+// resetting a password) is exactly the kind of "system config" the
+// Admin/Data-Entry-Staff tier ('moderator') shouldn't have -- otherwise any
+// staff account could promote itself (or anyone else) to full admin. Viewing
+// the list (GET) stays open to any authenticated admin.
+const requireElevated = requireRole('admin');
 
 // GET ALL ADMINS
 router.get('/', async (req, res) => {
@@ -19,7 +26,7 @@ router.get('/', async (req, res) => {
 });
 
 // CREATE NEW ADMIN
-router.post('/', async (req, res) => {
+router.post('/', requireElevated, async (req, res) => {
   const { name, email, password, role } = req.body;
   let connection;
   try {
@@ -39,7 +46,7 @@ router.post('/', async (req, res) => {
 });
 
 // UPDATE ADMIN (Activate / Deactivate / Change Role)
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireElevated, async (req, res) => {
   const { name, email, role, is_active } = req.body;
   let connection;
   try {
@@ -54,7 +61,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // SET / UPDATE AN ADMIN'S PASSWORD
-router.put('/:id/password', requireAdmin, async (req, res) => {
+router.put('/:id/password', requireAdmin, requireElevated, async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters long.' });

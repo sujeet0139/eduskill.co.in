@@ -175,6 +175,12 @@ app.use('/api/exams', requireAdmin, examsRouter);
 const batchesRouter = require('./routes/batches');
 app.use('/api/batches', requireAdmin, batchesRouter);
 
+const syllabusRouter = require('./routes/syllabus');
+app.use('/api/syllabus', requireAdmin, syllabusRouter);
+
+const progressRouter = require('./routes/progress');
+app.use('/api/progress', requireAdmin, progressRouter);
+
 const heroSlidesRouter = require('./routes/hero-slides');
 app.use('/api/hero-slides', requireAdmin, heroSlidesRouter);
 

@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const { requireTeacher } = require('../middleware/teacherAuth');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { extractYouTubeId, youTubeEmbedUrl } = require('../lib/youtube');
 
 // All routes here require a logged-in teacher.
 router.use(requireTeacher);
@@ -238,9 +239,13 @@ router.post('/sessions/:sessionId/attendance', async (req, res) => {
 });
 
 // ---- MATERIALS (item #27 -- "material upload, visible only to that
-// batch's enrolled students") -- tagged to the batch's course/program,
-// which is exactly how routes/student-dashboard.js already scopes
-// visibility to enrolled students. ----
+// batch's enrolled students") -- the teacher's own view here intentionally
+// shows BOTH the batch's general course/program materials (e.g. ones an
+// admin uploaded course-wide) AND anything shared directly against this
+// batch_id (POST below), so the teacher sees the full picture. The POST
+// below is careful NOT to tag its own inserts with course_id/program_id,
+// specifically so those rows stay batch-only for students (see its
+// comment) -- this GET's broader OR is what surfaces them here anyway. ----
 router.get('/batches/:batchId/materials', async (req, res) => {
   let connection;
   try {
@@ -248,8 +253,8 @@ router.get('/batches/:batchId/materials', async (req, res) => {
     const batch = await ownsBatch(connection, req.params.batchId, req.teacher.id);
     if (!batch) return res.status(403).json({ error: 'Not your batch.' });
     const [materials] = await connection.query(
-      'SELECT * FROM study_materials WHERE (course_id = ? OR program_id = ?) AND is_active = TRUE ORDER BY created_at DESC',
-      [batch.course_id || null, batch.program_id || null]
+      'SELECT * FROM study_materials WHERE (course_id = ? OR program_id = ? OR batch_id = ?) AND is_active = TRUE ORDER BY created_at DESC',
+      [batch.course_id || null, batch.program_id || null, req.params.batchId]
     );
     res.json({ success: true, materials });
   } catch (error) {
@@ -259,20 +264,100 @@ router.get('/batches/:batchId/materials', async (req, res) => {
   }
 });
 
+// Section F#2 -- a teacher can share EITHER an uploaded file OR a YouTube
+// link (not both). `document` stays optional on the multer middleware so a
+// video-only submission (no file) still gets past it.
 router.post('/batches/:batchId/materials', materialUpload.single('document'), async (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, video_url } = req.body;
   const filePath = fileUrl(req.file);
-  if (!title || !filePath) return res.status(400).json({ error: 'Title and document are required.' });
+  let embedUrl = null;
+  if (video_url) {
+    const videoId = extractYouTubeId(video_url);
+    if (!videoId) return res.status(400).json({ error: 'That doesn\'t look like a YouTube link. Paste the normal share/watch URL.' });
+    embedUrl = youTubeEmbedUrl(videoId);
+  }
+  if (!title || !(filePath || embedUrl)) {
+    return res.status(400).json({ error: 'Title and either a document or a YouTube link are required.' });
+  }
+  // Enforce the "EITHER a file OR a link, not both" rule stated above --
+  // without this, sending both silently stores the file but the student
+  // dashboard only ever renders m.video_url when set, so the uploaded file
+  // becomes permanently unreachable storage instead of a clear error.
+  if (filePath && embedUrl) {
+    return res.status(400).json({ error: 'Share either a document or a YouTube link, not both.' });
+  }
   let connection;
   try {
     connection = await pool.getConnection();
     const batch = await ownsBatch(connection, req.params.batchId, req.teacher.id);
     if (!batch) return res.status(403).json({ error: 'Not your batch.' });
+    // Deliberately NOT setting course_id/program_id here (even though the
+    // batch has them) -- this material is meant to be visible only to
+    // *this batch's* students, per the comment on the GET route above. If
+    // it also carried the batch's course_id, the
+    // "course_id IN (SELECT course_id FROM student_courses ...)" clause in
+    // routes/student-dashboard.js's /materials query would match it for
+    // every OTHER batch of the same course too, defeating the whole point
+    // of batch-targeting. batch_id alone is sufficient for visibility;
+    // admin's "Tagged to" display falls back to "Batch #N" for these.
     await connection.query(
-      'INSERT INTO study_materials (title, description, course_id, program_id, file_path) VALUES (?, ?, ?, ?, ?)',
-      [title, description || null, batch.course_id || null, batch.program_id || null, filePath]
+      'INSERT INTO study_materials (title, description, batch_id, file_path, video_url) VALUES (?, ?, ?, ?, ?)',
+      [title, description || null, req.params.batchId, filePath || null, embedUrl]
     );
-    res.status(201).json({ success: true, message: 'Material uploaded.' });
+    res.status(201).json({ success: true, message: 'Material shared.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// ---- SYLLABUS CHECKLIST (Section G) -- a one-tap checklist directly on the
+// teacher's own batch view, no separate screen to remember to visit. ----
+router.get('/batches/:batchId/syllabus', async (req, res) => {
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const batch = await ownsBatch(connection, req.params.batchId, req.teacher.id);
+    if (!batch) return res.status(403).json({ error: 'Not your batch.' });
+    const [topics] = await connection.query(`
+      SELECT st.id, st.title, st.order_no, COALESCE(btp.status, 'not_started') AS status
+      FROM syllabus_topics st
+      LEFT JOIN batch_topic_progress btp ON btp.topic_id = st.id AND btp.batch_id = ?
+      WHERE st.course_id = ?
+      ORDER BY st.order_no ASC, st.id ASC
+    `, [req.params.batchId, batch.course_id]);
+    res.json({ success: true, topics });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+router.put('/batches/:batchId/syllabus/:topicId', async (req, res) => {
+  const { status } = req.body;
+  if (!['not_started', 'in_progress', 'completed'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status.' });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const batch = await ownsBatch(connection, req.params.batchId, req.teacher.id);
+    if (!batch) return res.status(403).json({ error: 'Not your batch.' });
+    // Confirm the topic actually belongs to this batch's course -- ownsBatch
+    // only proves the teacher owns the batch, not that topicId is one of
+    // its course's topics, so without this a crafted topicId could record
+    // progress against a completely different course's topic.
+    const [[topic]] = await connection.query('SELECT id FROM syllabus_topics WHERE id = ? AND course_id = ?', [req.params.topicId, batch.course_id]);
+    if (!topic) return res.status(404).json({ error: 'Topic not found for this batch\'s course.' });
+    await connection.query(
+      `INSERT INTO batch_topic_progress (batch_id, topic_id, status, covered_by, covered_at)
+       VALUES (?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE status = ?, covered_by = ?, covered_at = NOW()`,
+      [req.params.batchId, req.params.topicId, status, req.teacher.id, status, req.teacher.id]
+    );
+    res.json({ success: true, message: 'Progress updated.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {

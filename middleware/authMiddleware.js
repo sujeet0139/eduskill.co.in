@@ -25,6 +25,24 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
+// RBAC (master-dev-prompt Section H#2). Must run after `requireAdmin` (relies
+// on req.admin already being set -- either from the inline middleware or,
+// more commonly in this codebase, the app-level `app.use(path, requireAdmin,
+// router)` mount in server.js). Restricts a route to specific admin_users
+// roles -- e.g. requireRole('admin') to keep "system config" screens
+// (Settings, form builder, managing other admin accounts) away from the
+// 'moderator' role (today's Admin/Data-Entry-Staff tier), without touching
+// the existing 'admin'/'moderator' values already stored on real accounts.
+const requireRole = (...allowedRoles) => (req, res, next) => {
+  if (!req.admin) {
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
+  if (!allowedRoles.includes(req.admin.role)) {
+    return res.status(403).json({ error: `Access denied. Requires one of: ${allowedRoles.join(', ')}.` });
+  }
+  next();
+};
+
 // Generic "is logged in" guard (any role). Used by /api/auth/me.
 const requireAuth = (req, res, next) => {
   const token = getTokenFromReq(req);
@@ -41,4 +59,4 @@ const requireAuth = (req, res, next) => {
   }
 };
 
-module.exports = { requireAdmin, requireAuth };
+module.exports = { requireAdmin, requireAuth, requireRole };

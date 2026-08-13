@@ -60,14 +60,17 @@ router.get('/colleges', async (req, res) => {
   }
 });
 
-// GET /api/public/states - distinct states with a district, for the
-// State -> District cascade (item #23). Read-only, no PII, safe public.
+// GET /api/public/states - full India state/UT list, for the State ->
+// District cascade (item #23; normalized per master-dev-prompt Section
+// C#1). Sourced from the seeded `states` table, not
+// `SELECT DISTINCT state FROM districts` -- that only ever showed states
+// someone happened to add a district for. Read-only, no PII, safe public.
 router.get('/states', async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
-    const [rows] = await connection.query('SELECT DISTINCT state FROM districts ORDER BY state ASC');
-    res.json({ success: true, states: rows.map((r) => r.state) });
+    const [rows] = await connection.query('SELECT name FROM states ORDER BY name ASC');
+    res.json({ success: true, states: rows.map((r) => r.name) });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch states', details: error.message });
   } finally {

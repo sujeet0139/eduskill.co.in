@@ -20,6 +20,7 @@ export default function StudentDashboard() {
   const [assignments, setAssignments] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [liveClasses, setLiveClasses] = useState([]);
+  const [syllabusTopics, setSyllabusTopics] = useState([]);
   const [payInfo, setPayInfo] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -48,6 +49,7 @@ export default function StudentDashboard() {
     api.get("/api/student-dashboard/assignments", token()).then((d) => setAssignments(d.assignments || [])).catch(() => {});
     api.get("/api/student-dashboard/materials", token()).then((d) => setMaterials(d.materials || [])).catch(() => {});
     api.get("/api/student-dashboard/live-classes", token()).then((d) => setLiveClasses(d.classes || [])).catch(() => {});
+    api.get("/api/student-dashboard/syllabus", token()).then((d) => setSyllabusTopics(d.topics || [])).catch(() => {});
     api.get("/api/public/payment-info").then((d) => setPayInfo(d.payment || {})).catch(() => {});
   };
 
@@ -56,6 +58,14 @@ export default function StudentDashboard() {
 
   const loadPayments = (sid) =>
     api.get(`/api/payments?student_id=${sid}`).then((d) => setPayments(d.payments || [])).catch(() => {});
+
+  // Section G item 3 -- one tap, no text field, or response rates collapse.
+  const confirmTopic = async (topic, confirmation) => {
+    try {
+      await api.post(`/api/student-dashboard/syllabus/${topic.topic_id}/confirm`, { batch_id: topic.batch_id, confirmation }, token());
+      setSyllabusTopics((prev) => prev.map((t) => (t.topic_id === topic.topic_id && t.batch_id === topic.batch_id) ? { ...t, confirmation } : t));
+    } catch { /* leave the tap unconfirmed on failure so the student can retry, rather than showing a false success */ }
+  };
 
   useEffect(() => {
     if (!studentAuth.token()) { router.replace("/login"); return; }
@@ -301,7 +311,18 @@ export default function StudentDashboard() {
           <p className="text-sm text-gray-500">No materials available yet.</p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {materials.map((m) => (
+            {materials.map((m) => m.video_url ? (
+              <div key={m.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                <p className="font-semibold text-gray-900">{m.title}</p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  {m.subject ? m.subject : (m.course_title || m.program_title || m.category || "General")}
+                </p>
+                {m.description && <p className="mt-1 line-clamp-2 text-xs text-gray-400">{m.description}</p>}
+                <div className="mt-2 aspect-video overflow-hidden rounded-lg">
+                  <iframe src={m.video_url} title={m.title} allowFullScreen className="h-full w-full" />
+                </div>
+              </div>
+            ) : (
               <a key={m.id} href={api.mediaUrl(m.file_path)} target="_blank" rel="noreferrer"
                 className="rounded-xl border border-gray-200 bg-white p-4 transition hover:shadow-md">
                 <p className="font-semibold text-gray-900">{m.title}</p>
@@ -315,6 +336,28 @@ export default function StudentDashboard() {
           </div>
         )}
       </section>
+
+      {/* Syllabus self-confirmation (topics the teacher has marked covered) */}
+      {syllabusTopics.length > 0 && (
+        <section id="s-syllabus" className="mt-10 scroll-mt-4">
+          <h2 className="mb-3 text-lg font-bold text-gray-900">Topics Covered — Confirm Your Understanding</h2>
+          <div className="space-y-2">
+            {syllabusTopics.map((t) => (
+              <div key={`${t.batch_id}-${t.topic_id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3">
+                <span className="text-sm font-medium text-gray-900">{t.title}</span>
+                <div className="flex gap-1.5">
+                  {[["got_it", "🟢 Got it"], ["need_revision", "🟡 Need revision"], ["didnt_attend", "⚪ Didn't attend"]].map(([val, label]) => (
+                    <button key={val} onClick={() => confirmTopic(t, val)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-medium ${t.confirmation === val ? "bg-brand text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <InstituteConnect />
 

@@ -38,7 +38,13 @@ router.get('/:slug', async (req, res) => {
 
     const state = campaignState(campaign);
     if (state !== 'active') {
-      return res.json({ success: true, state, campaign: { name: campaign.name } });
+      // 'not_started' includes starts_at so the landing page can tell the
+      // visitor the actual open time instead of a vague "check back soon"
+      // (a support mystery otherwise, since the link genuinely looks broken
+      // until then).
+      const campaignInfo = { name: campaign.name };
+      if (state === 'not_started') campaignInfo.starts_at = campaign.starts_at;
+      return res.json({ success: true, state, campaign: campaignInfo });
     }
 
     // Fire-and-forget-ish: a miscount here must never break the page.

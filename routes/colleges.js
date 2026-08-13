@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { resolveStateId } = require('../lib/states');
 
 const logoUpload = makeUpload({
   folder: 'eduskill/college-logos',
@@ -55,10 +56,12 @@ router.post('/', async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
+    const stateName = state || 'Bihar';
+    const stateId = await resolveStateId(connection, stateName);
     await connection.query(
-      `INSERT INTO colleges (name, college_code, district_id, state, address, contact_no, principal_details, university_id, website, logo_url, principal_name, principal_phone)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, college_code, district_id || null, state || 'Bihar', address, contact_no, principal_details,
+      `INSERT INTO colleges (name, college_code, district_id, state, state_id, address, contact_no, principal_details, university_id, website, logo_url, principal_name, principal_phone)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, college_code, district_id || null, stateName, stateId, address, contact_no, principal_details,
        university_id || null, website || null, logo_url || null, principal_name || null, principal_phone || null]
     );
     res.json({ success: true, message: 'College added successfully' });
@@ -75,10 +78,17 @@ router.put('/:id', async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
+    // Only fall back to 'Bihar' on CREATE. On UPDATE, a caller that omits
+    // `state` (an older cached frontend bundle mid-deploy, a script, a
+    // direct API call) must not silently blow away a college's real,
+    // already-correct state -- so fall back to the existing value instead.
+    const [[existing]] = await connection.query('SELECT state FROM colleges WHERE id = ?', [req.params.id]);
+    const stateName = state || existing?.state || 'Bihar';
+    const stateId = await resolveStateId(connection, stateName);
     await connection.query(
-      `UPDATE colleges SET name=?, college_code=?, district_id=?, state=?, address=?, contact_no=?, principal_details=?,
+      `UPDATE colleges SET name=?, college_code=?, district_id=?, state=?, state_id=?, address=?, contact_no=?, principal_details=?,
        university_id=?, website=?, logo_url=?, principal_name=?, principal_phone=? WHERE id=?`,
-      [name, college_code, district_id || null, state, address, contact_no, principal_details,
+      [name, college_code, district_id || null, stateName, stateId, address, contact_no, principal_details,
        university_id || null, website || null, logo_url || null, principal_name || null, principal_phone || null, req.params.id]
     );
     res.json({ success: true, message: 'College updated successfully' });

@@ -7,10 +7,11 @@ import { Button, Input } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
 import { useToast } from "@/components/Toast";
 
-const EMPTY = { name: "", code: "" };
+const EMPTY = { name: "", code: "", state: "Bihar" };
 
 export default function AdminDistricts() {
   const [districts, setDistricts] = useState([]);
+  const [states, setStates] = useState([]);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(EMPTY);
@@ -19,11 +20,17 @@ export default function AdminDistricts() {
   const notify = useToast();
 
   const load = () => api.get("/api/districts", token()).then((d) => setDistricts(d.districts || [])).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Full India state list (master-dev-prompt Section C#1) -- previously
+    // this dropdown didn't exist at all and every city/district silently
+    // defaulted to Bihar, so the seeded state list had nowhere to be used.
+    api.get("/api/districts/states", token()).then((d) => setStates(d.states || [])).catch(() => {});
+  }, []);
 
   const change = (e) => setForm({ ...form, [e.target.name]: e.target.value });
   const openNew = () => { setForm(EMPTY); setEditId(null); setModal(true); };
-  const openEdit = (d) => { setForm({ ...EMPTY, name: d.name, code: d.code }); setEditId(d.id); setModal(true); };
+  const openEdit = (d) => { setForm({ ...EMPTY, name: d.name, code: d.code, state: d.state || "Bihar" }); setEditId(d.id); setModal(true); };
 
   const save = async (e) => {
     e.preventDefault();
@@ -45,7 +52,7 @@ export default function AdminDistricts() {
 
       <TableWrap>
         <thead className="bg-gray-50">
-          <tr><Th>Name</Th><Th>Code</Th><Th>Colleges</Th><Th>Actions</Th></tr>
+          <tr><Th>Name</Th><Th>State</Th><Th>Code</Th><Th>Colleges</Th><Th>Actions</Th></tr>
         </thead>
         <tbody className="divide-y">
           {districts.length === 0 ? (
@@ -53,6 +60,7 @@ export default function AdminDistricts() {
           ) : districts.map((d) => (
             <tr key={d.id} className="hover:bg-gray-50">
               <Td className="font-medium">{d.name}</Td>
+              <Td>{d.state}</Td>
               <Td>{d.code}</Td>
               <Td>{d.total_colleges ?? 0}</Td>
               <Td>
@@ -69,6 +77,15 @@ export default function AdminDistricts() {
       <Modal open={modal} title={editId ? "Edit City" : "New City"} onClose={() => setModal(false)}>
         <form onSubmit={save} className="space-y-3">
           <Input label="City / District Name *" name="name" value={form.name} onChange={change} required />
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700">State *</span>
+            <select
+              name="state" value={form.state} onChange={change} required
+              className="w-full rounded-lg border-2 border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            >
+              {states.map((s) => (<option key={s} value={s}>{s}</option>))}
+            </select>
+          </label>
           <Input label="Code *" name="code" value={form.code} onChange={change} required placeholder="e.g., DBG" />
           <Button type="submit" className="w-full">{editId ? "Update" : "Create"}</Button>
         </form>

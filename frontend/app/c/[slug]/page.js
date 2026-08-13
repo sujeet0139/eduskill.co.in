@@ -109,7 +109,11 @@ export default function CampaignPage() {
     return (
       <main className="flex min-h-[80vh] flex-col items-center justify-center gap-3 px-4 text-center">
         <h1 className="text-xl font-bold text-gray-900">Not open yet</h1>
-        <p className="text-gray-500">This registration link isn&apos;t open yet. Please check back soon.</p>
+        <p className="text-gray-500">
+          {campaign?.starts_at
+            ? <>This registration link opens on <strong>{new Date(campaign.starts_at).toLocaleString()}</strong>. Please check back then.</>
+            : "This registration link isn't open yet. Please check back soon."}
+        </p>
       </main>
     );
   }

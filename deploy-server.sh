@@ -31,32 +31,40 @@ FE="eduskill-frontend"
 
 echo "==> Target live release: $REL"
 
-echo "==> 1/6  Sync base repo to origin/main"
+echo "==> 1/7  Pre-deploy DB backup (Section I -- a migration or a bad merge"
+echo "         should never mean there's no way back)"
+if [ -f "$REL/scripts/backup-db.sh" ]; then
+  bash "$REL/scripts/backup-db.sh" "$REL" || echo "⚠️  Backup failed -- continuing anyway, but you're deploying without a fresh safety net."
+else
+  echo "⚠️  scripts/backup-db.sh not present in the live release yet (expected on the first deploy after it was added) -- skipping this once."
+fi
+
+echo "==> 2/7  Sync base repo to origin/main"
 cd "$BASE"
 git fetch origin
 git reset --hard origin/main
 git log --oneline -1
 
-echo "==> 2/6  Copy source into the live release (preserve runtime files)"
+echo "==> 3/7  Copy source into the live release (preserve runtime files)"
 rsync -a \
   --exclude=".git" --exclude="node_modules" --exclude=".next" \
   --exclude=".env" --exclude=".env.local" --exclude="uploads" \
   --exclude="releases" --exclude="current" --exclude="*.bak*" \
   "$BASE/" "$REL/"
 
-echo "==> 3/6  Backend dependencies"
+echo "==> 4/7  Backend dependencies"
 cd "$REL"
 npm install --omit=dev
 
-echo "==> 4/6  Database migration (idempotent — safe to re-run)"
+echo "==> 5/7  Database migration (idempotent — safe to re-run)"
 node check-db.js
 
-echo "==> 5/6  Build frontend"
+echo "==> 6/7  Build frontend"
 cd "$REL/frontend"
 npm install
 npm run build
 
-echo "==> 6/6  Restart apps + health check"
+echo "==> 7/7  Restart apps + health check"
 pm2 restart "$API" "$FE" --update-env
 pm2 save || true
 sleep 4

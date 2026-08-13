@@ -17,7 +17,15 @@ const pool = mysql.createPool({
   // connection limit across many concurrent function invocations.
   connectionLimit: Number(process.env.DB_POOL_LIMIT) || (process.env.VERCEL ? 3 : 10),
   queueLimit: 0,
-  ssl: useSSL ? { rejectUnauthorized: true } : undefined
+  ssl: useSSL ? { rejectUnauthorized: true } : undefined,
+  // Single-institute platform, IST throughout -- no per-request conversion
+  // needed. Without this, mysql2 reads DATETIME columns back into JS Date
+  // objects using the Node process's OS timezone (often UTC on a VPS), so a
+  // campaign/live-class time entered as e.g. 10:00 IST gets read back as
+  // 10:00 UTC (= 15:30 IST), shifting every "is this open/started yet?"
+  // comparison by 5.5 hours. Pinning the connection timezone here makes
+  // writes (plain datetime-local strings, unaffected) and reads agree.
+  timezone: '+05:30'
 });
 
 module.exports = pool;

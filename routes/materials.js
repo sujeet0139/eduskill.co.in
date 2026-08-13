@@ -46,11 +46,14 @@ function materialsQuery(extraWhere = '', activeOnly = true) {
           ORDER BY m.created_at DESC`;
 }
 
-// PUBLIC: GET ACTIVE *GENERAL* STUDY MATERIALS (untagged). Course/program-tagged
-// materials are private to enrolled students (served by /api/student-dashboard/materials).
+// PUBLIC: GET ACTIVE *GENERAL* STUDY MATERIALS (untagged). Course/program/batch-
+// tagged materials are private to enrolled students (served by
+// /api/student-dashboard/materials). batch_id is excluded too (Section F#2) --
+// a teacher-shared, batch-only material has no reason to leak into the public
+// list even on the rare batch that has neither course_id nor program_id set.
 router.get('/', async (req, res) => {
   const { subject } = req.query;
-  const where = ['AND m.course_id IS NULL AND m.program_id IS NULL'];
+  const where = ['AND m.course_id IS NULL AND m.program_id IS NULL AND m.batch_id IS NULL'];
   const params = [];
   if (subject) { where.push('AND m.subject = ?'); params.push(subject); }
   let connection;

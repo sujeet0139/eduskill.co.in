@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+// Lightweight external-expert directory (name/hourly_rate/expertise), no
+// login. Referenced as batches.mentor_id. NOT the same role as `teachers`
+// (login-capable, drives the teacher portal) -- see ARCHITECTURE-DECISIONS.md
+// ("Faculty vs. Teacher") before building anything that assumes these merge.
+
 // GET ALL FACULTY
 router.get('/', async (req, res) => {
   let connection;

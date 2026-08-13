@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, StatusBadge } from "@/components/ui";
-import { PageHeader, TableWrap, Th, Td, Modal } from "@/components/admin";
+import { PageHeader, TableWrap, Th, Td, Modal, Pagination } from "@/components/admin";
 import { useToast } from "@/components/Toast";
+
+const PAGE_SIZE = 20;
 
 export default function AdminCampaigns() {
   const [campaigns, setCampaigns] = useState([]);
@@ -16,6 +18,10 @@ export default function AdminCampaigns() {
   const [cloneName, setCloneName] = useState("");
   const [cloneBusy, setCloneBusy] = useState(false);
   const [compareIds, setCompareIds] = useState([]);
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [sort, setSort] = useState("newest");
+  const [page, setPage] = useState(1);
 
   const token = () => adminAuth.token();
   const notify = useToast();
@@ -45,6 +51,25 @@ export default function AdminCampaigns() {
 
   const toggleCompare = (id) => setCompareIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
 
+  const filtered = useMemo(() => {
+    const rows = campaigns.filter((c) => {
+      if (statusFilter && c.status !== statusFilter) return false;
+      if (q) {
+        const hay = [c.name, c.slug, c.course_title, c.program_title, c.college_name, c.batch_name].join(" ").toLowerCase();
+        if (!hay.includes(q.toLowerCase())) return false;
+      }
+      return true;
+    });
+    return [...rows].sort((a, b) => {
+      if (sort === "registrations") return (b.registration_count || 0) - (a.registration_count || 0);
+      if (sort === "views") return (b.view_count || 0) - (a.view_count || 0);
+      return new Date(b.created_at) - new Date(a.created_at); // newest (default)
+    });
+  }, [campaigns, q, statusFilter, sort]);
+
+  useEffect(() => { setPage(1); }, [q, statusFilter, sort]);
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   return (
     <>
       <PageHeader
@@ -63,14 +88,31 @@ export default function AdminCampaigns() {
       />
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
+      <div className="mb-3 flex flex-wrap gap-2">
+        <input placeholder="Search name / slug / target…" value={q} onChange={(e) => setQ(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm focus:border-brand focus:outline-none" />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 bg-white px-3 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+        </select>
+        <select value={sort} onChange={(e) => setSort(e.target.value)}
+          className="rounded-lg border-2 border-gray-200 bg-white px-3 py-1.5 text-sm focus:border-brand focus:outline-none">
+          <option value="newest">Newest first</option>
+          <option value="registrations">Most registrations</option>
+          <option value="views">Most views</option>
+        </select>
+      </div>
+
       <TableWrap>
         <thead className="bg-gray-50">
           <tr><Th></Th><Th>Name</Th><Th>Link</Th><Th>Target</Th><Th>Status</Th><Th>Registrations</Th><Th>Views</Th><Th>Actions</Th></tr>
         </thead>
         <tbody className="divide-y">
-          {campaigns.length === 0 ? (
-            <tr><Td className="text-gray-500">No campaigns yet.</Td></tr>
-          ) : campaigns.map((c) => (
+          {paged.length === 0 ? (
+            <tr><Td className="text-gray-500">No campaigns found.</Td></tr>
+          ) : paged.map((c) => (
             <tr key={c.id} className="hover:bg-gray-50">
               <Td><input type="checkbox" checked={compareIds.includes(c.id)} onChange={() => toggleCompare(c.id)} /></Td>
               <Td className="font-medium">
@@ -95,6 +137,7 @@ export default function AdminCampaigns() {
           ))}
         </tbody>
       </TableWrap>
+      <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
 
       <Modal open={!!cloning} title="Clone Campaign" onClose={() => setCloning(null)}>
         <div className="space-y-3">

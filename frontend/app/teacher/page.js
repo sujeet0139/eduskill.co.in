@@ -242,12 +242,14 @@ function BatchDetail({ batch, token, onClose }) {
   const [students, setStudents] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [materials, setMaterials] = useState([]);
+  const [topics, setTopics] = useState([]);
   const [error, setError] = useState("");
 
   const load = () => {
     api.get(`/api/teacher-portal/batches/${batch.id}/students`, token()).then((d) => setStudents(d.students || [])).catch((e) => setError(e.message));
     api.get(`/api/teacher-portal/batches/${batch.id}/sessions`, token()).then((d) => setSessions(d.sessions || [])).catch(() => {});
     api.get(`/api/teacher-portal/batches/${batch.id}/materials`, token()).then((d) => setMaterials(d.materials || [])).catch(() => {});
+    api.get(`/api/teacher-portal/batches/${batch.id}/syllabus`, token()).then((d) => setTopics(d.topics || [])).catch(() => {});
   };
   useEffect(load, [batch.id]);
 
@@ -260,7 +262,7 @@ function BatchDetail({ batch, token, onClose }) {
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       <div className="mb-4 flex gap-4 border-b">
-        {["roster", "sessions", "materials"].map((t) => (
+        {["roster", "sessions", "materials", "syllabus"].map((t) => (
           <button key={t} onClick={() => setSubTab(t)}
             className={`pb-2 text-sm font-medium capitalize ${subTab === t ? "border-b-2 border-indigo-700 text-indigo-700" : "text-gray-500"}`}>
             {t}
@@ -285,6 +287,45 @@ function BatchDetail({ batch, token, onClose }) {
       {subTab === "sessions" && <SessionsPanel batch={batch} sessions={sessions} students={students} token={token} onChanged={load} />}
 
       {subTab === "materials" && <MaterialsPanel batch={batch} materials={materials} token={token} onChanged={load} />}
+
+      {subTab === "syllabus" && <SyllabusPanel batch={batch} topics={topics} token={token} onChanged={load} />}
+    </div>
+  );
+}
+
+// One-tap syllabus checklist (master-dev-prompt Section G item 2). Topics
+// are defined once per Course (admin-managed); tapping a status here cycles
+// it for THIS batch only, so the same course's topic list is reused across
+// every batch taking it.
+const STATUS_CYCLE = { not_started: "in_progress", in_progress: "completed", completed: "not_started" };
+const STATUS_LABEL = { not_started: "⚪ Not started", in_progress: "🟡 In progress", completed: "🟢 Completed" };
+
+function SyllabusPanel({ batch, topics, token, onChanged }) {
+  const [busyId, setBusyId] = useState(null);
+
+  const tap = async (topic) => {
+    setBusyId(topic.id);
+    try {
+      await api.put(`/api/teacher-portal/batches/${batch.id}/syllabus/${topic.id}`, { status: STATUS_CYCLE[topic.status] }, token());
+      onChanged();
+    } catch (err) { alert(err.message); }
+    finally { setBusyId(null); }
+  };
+
+  if (topics.length === 0) {
+    return <p className="text-sm text-gray-500">No syllabus topics defined for this course yet -- ask an admin to add them under Admin → Syllabus.</p>;
+  }
+  return (
+    <div className="divide-y">
+      {topics.map((t) => (
+        <div key={t.id} className="flex items-center justify-between py-2">
+          <span className="text-sm font-medium">{t.title}</span>
+          <button onClick={() => tap(t)} disabled={busyId === t.id}
+            className="rounded-lg bg-gray-100 px-3 py-1 text-xs font-medium hover:bg-gray-200 disabled:opacity-50">
+            {STATUS_LABEL[t.status]}
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -383,19 +424,21 @@ function MaterialsPanel({ batch, materials, token, onChanged }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState(null);
+  const [videoUrl, setVideoUrl] = useState("");
   const [uploading, setUploading] = useState(false);
 
   const upload = async (e) => {
     e.preventDefault();
-    if (!title || !file) { alert("Title and a file are required."); return; }
+    if (!title || !(file || videoUrl)) { alert("Title and either a file or a YouTube link are required."); return; }
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("title", title);
       fd.append("description", description);
-      fd.append("document", file);
+      if (file) fd.append("document", file);
+      if (videoUrl) fd.append("video_url", videoUrl);
       await api.postForm(`/api/teacher-portal/batches/${batch.id}/materials`, fd, token());
-      setTitle(""); setDescription(""); setFile(null);
+      setTitle(""); setDescription(""); setFile(null); setVideoUrl("");
       onChanged();
     } catch (err) { alert(err.message); }
     finally { setUploading(false); }
@@ -410,16 +453,19 @@ function MaterialsPanel({ batch, materials, token, onChanged }) {
           className="w-full rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm" />
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)}
           className="block w-full text-sm text-gray-600 file:mr-2 file:rounded-lg file:border-0 file:bg-indigo-700 file:px-3 file:py-1.5 file:text-white" />
+        <p className="text-center text-xs text-gray-400">— or —</p>
+        <input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="Paste a YouTube video link"
+          className="w-full rounded-lg border-2 border-gray-200 px-3 py-1.5 text-sm" />
         <button type="submit" disabled={uploading} className="rounded-lg bg-indigo-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-800">
-          {uploading ? "Uploading…" : "Upload"}
+          {uploading ? "Sharing…" : "Share"}
         </button>
       </form>
       {materials.length === 0 ? <p className="text-sm text-gray-500">No materials for this batch yet.</p> : (
         <div className="divide-y">
           {materials.map((m) => (
             <div key={m.id} className="flex items-center justify-between py-2">
-              <span className="text-sm font-medium">{m.title}</span>
-              <a href={fileHref(m.file_path)} target="_blank" rel="noreferrer" className="text-xs text-indigo-700 hover:underline">View</a>
+              <span className="text-sm font-medium">{m.title} {m.video_url && <span className="ml-1 text-xs text-red-600">▶ video</span>}</span>
+              <a href={m.video_url || fileHref(m.file_path)} target="_blank" rel="noreferrer" className="text-xs text-indigo-700 hover:underline">View</a>
             </div>
           ))}
         </div>

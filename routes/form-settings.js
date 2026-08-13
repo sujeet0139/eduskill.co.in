@@ -1,7 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
-const { requireAdmin } = require('../middleware/authMiddleware');
+const { requireAdmin, requireRole } = require('../middleware/authMiddleware');
+
+// Editing the public registration form's field set is "system config"
+// (master-dev-prompt Section H#2) -- kept away from the Admin/Data-Entry-
+// Staff tier ('moderator'). Reading the fields stays open (the public
+// registration page itself needs it, unauthenticated).
 
 // GET ALL REGISTRATION FIELDS
 router.get('/registration', async (req, res) => {
@@ -18,7 +23,7 @@ router.get('/registration', async (req, res) => {
 });
 
 // CREATE A NEW CUSTOM FIELD
-router.post('/registration', requireAdmin, async (req, res) => {
+router.post('/registration', requireAdmin, requireRole('admin'), async (req, res) => {
   const { label, type, is_mandatory, options } = req.body;
   if (!label || !type) {
     return res.status(400).json({ error: 'Label and type are required.' });
@@ -57,7 +62,7 @@ router.post('/registration', requireAdmin, async (req, res) => {
 });
 
 // BULK UPDATE REGISTRATION FIELDS
-router.put('/registration', requireAdmin, async (req, res) => {
+router.put('/registration', requireAdmin, requireRole('admin'), async (req, res) => {
   const { fields } = req.body; // Expects an array of field objects
   if (!Array.isArray(fields)) {
     return res.status(400).json({ error: 'Invalid payload. Expected an array of fields.' });
@@ -87,7 +92,7 @@ router.put('/registration', requireAdmin, async (req, res) => {
 
 // REORDER FIELDS — body { order: [id1, id2, ...] } in the desired display order.
 // Defined before "/registration/:id" so "reorder" isn't captured as an :id.
-router.put('/registration/reorder', requireAdmin, async (req, res) => {
+router.put('/registration/reorder', requireAdmin, requireRole('admin'), async (req, res) => {
   const { order } = req.body;
   if (!Array.isArray(order)) return res.status(400).json({ error: 'order must be an array of field ids.' });
   let connection;
@@ -110,7 +115,7 @@ router.put('/registration/reorder', requireAdmin, async (req, res) => {
 // EDIT A SINGLE FIELD. Label/enabled/mandatory are editable for all fields.
 // Type & options can only change for CUSTOM (non-standard) fields to protect
 // system fields like email/password.
-router.put('/registration/:id', requireAdmin, async (req, res) => {
+router.put('/registration/:id', requireAdmin, requireRole('admin'), async (req, res) => {
   const { label, is_mandatory, is_enabled, type, options } = req.body;
   let connection;
   try {
@@ -153,7 +158,7 @@ router.put('/registration/:id', requireAdmin, async (req, res) => {
 });
 
 // DELETE A CUSTOM FIELD
-router.delete('/registration/:id', requireAdmin, async (req, res) => {
+router.delete('/registration/:id', requireAdmin, requireRole('admin'), async (req, res) => {
   const fieldId = req.params.id;
   let connection;
   try {

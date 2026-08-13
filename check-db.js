@@ -34,6 +34,32 @@ async function checkDatabase() {
     
     console.log('🔄 Creating tables if they do not exist...');
     
+    // -1. STATES TABLE (master-dev-prompt Section C#1) -- a proper reference
+    // table instead of deriving the dropdown from `SELECT DISTINCT state FROM
+    // districts`, which only ever showed states someone happened to add a
+    // district for, and let "Bihar"/"bihar"/"BIHAR" fragment into separate
+    // dropdown entries since nothing constrained the free-text column.
+    // Created before `districts` since districts.state_id references it.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS states (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await connection.query(`
+      INSERT IGNORE INTO states (name) VALUES
+        ('Andhra Pradesh'), ('Arunachal Pradesh'), ('Assam'), ('Bihar'), ('Chhattisgarh'),
+        ('Goa'), ('Gujarat'), ('Haryana'), ('Himachal Pradesh'), ('Jharkhand'),
+        ('Karnataka'), ('Kerala'), ('Madhya Pradesh'), ('Maharashtra'), ('Manipur'),
+        ('Meghalaya'), ('Mizoram'), ('Nagaland'), ('Odisha'), ('Punjab'),
+        ('Rajasthan'), ('Sikkim'), ('Tamil Nadu'), ('Telangana'), ('Tripura'),
+        ('Uttar Pradesh'), ('Uttarakhand'), ('West Bengal'),
+        ('Andaman and Nicobar Islands'), ('Chandigarh'),
+        ('Dadra and Nagar Haveli and Daman and Diu'), ('Delhi'),
+        ('Jammu and Kashmir'), ('Ladakh'), ('Lakshadweep'), ('Puducherry')
+    `);
+
     // 0. DISTRICTS TABLE
     await connection.query(`
       CREATE TABLE IF NOT EXISTS districts (
@@ -83,6 +109,14 @@ async function checkDatabase() {
     await runAlterIfMissing('colleges', 'college_code', "ALTER TABLE colleges ADD COLUMN college_code VARCHAR(50) UNIQUE");
     await runAlterIfMissing('colleges', 'district_id', "ALTER TABLE colleges ADD COLUMN district_id INT");
     await runAlterIfMissing('colleges', 'state', "ALTER TABLE colleges ADD COLUMN state VARCHAR(50) DEFAULT 'Bihar'");
+    // Section C#1 continued -- same state_id backfill as districts, added
+    // once `states` exists (it's created at the top of this file, before
+    // this table). See the comment near districts.state_id for why the
+    // free-text `state` column stays.
+    await runAlterIfMissing('colleges', 'state_id', "ALTER TABLE colleges ADD COLUMN state_id INT AFTER state");
+    try { await connection.query("ALTER TABLE colleges ADD CONSTRAINT fk_college_state FOREIGN KEY (state_id) REFERENCES states(id) ON DELETE SET NULL"); } catch (e) {}
+    await connection.query(`UPDATE colleges c JOIN states s ON LOWER(TRIM(c.state)) = LOWER(s.name) SET c.state_id = s.id WHERE c.state_id IS NULL`);
+    await connection.query(`UPDATE colleges c JOIN states s ON LOWER(TRIM(c.state)) = LOWER(s.name) SET c.state = s.name WHERE c.state <> s.name`);
     await runAlterIfMissing('colleges', 'address', "ALTER TABLE colleges ADD COLUMN address TEXT");
     await runAlterIfMissing('colleges', 'contact_no', "ALTER TABLE colleges ADD COLUMN contact_no VARCHAR(50)");
     await runAlterIfMissing('colleges', 'principal_details', "ALTER TABLE colleges ADD COLUMN principal_details TEXT");
@@ -97,6 +131,18 @@ async function checkDatabase() {
     // a different state going forward just need this set explicitly).
     await runAlterIfMissing('districts', 'state', "ALTER TABLE districts ADD COLUMN state VARCHAR(50) NOT NULL DEFAULT 'Bihar'");
 
+    // Section C#1 continued -- FK'd state_id alongside the existing free-text
+    // `state` column (kept, not replaced: the registration form, college
+    // form and every existing API contract still read/write `state` as a
+    // name, and rewriting all of those is a separate, deliberate follow-up).
+    // Backfilling here gives every downstream query a reliable state_id to
+    // join on today, and cleans up any pre-existing casing drift
+    // ("bihar"/"BIHAR") back to the canonical name from `states`.
+    await runAlterIfMissing('districts', 'state_id', "ALTER TABLE districts ADD COLUMN state_id INT AFTER state");
+    try { await connection.query("ALTER TABLE districts ADD CONSTRAINT fk_district_state FOREIGN KEY (state_id) REFERENCES states(id) ON DELETE SET NULL"); } catch (e) {}
+    await connection.query(`UPDATE districts d JOIN states s ON LOWER(TRIM(d.state)) = LOWER(s.name) SET d.state_id = s.id WHERE d.state_id IS NULL`);
+    await connection.query(`UPDATE districts d JOIN states s ON LOWER(TRIM(d.state)) = LOWER(s.name) SET d.state = s.name WHERE d.state <> s.name`);
+
     await connection.query(`
       CREATE TABLE IF NOT EXISTS universities (
         id INT PRIMARY KEY AUTO_INCREMENT,
@@ -104,6 +150,15 @@ async function checkDatabase() {
       )
     `);
     await connection.query(`INSERT IGNORE INTO universities (name) VALUES ('Lalit Narayan Mithila University (LNMU)')`);
+    // Section C#3 -- "Complete the University entity. Currently name-only
+    // with GET/POST only." It really was: routes/universities.js had no
+    // PUT/DELETE at all, and no admin screen existed to manage it (colleges
+    // only ever read the list for a dropdown). See routes/universities.js
+    // and the new /admin/universities page for the rest of this.
+    await runAlterIfMissing('universities', 'short_code', "ALTER TABLE universities ADD COLUMN short_code VARCHAR(20)");
+    await runAlterIfMissing('universities', 'state', "ALTER TABLE universities ADD COLUMN state VARCHAR(50)");
+    await runAlterIfMissing('universities', 'website', "ALTER TABLE universities ADD COLUMN website VARCHAR(255)");
+    await runAlterIfMissing('universities', 'logo_url', "ALTER TABLE universities ADD COLUMN logo_url VARCHAR(500)");
 
     await runAlterIfMissing('colleges', 'university_id', "ALTER TABLE colleges ADD COLUMN university_id INT");
     await runAlterIfMissing('colleges', 'website', "ALTER TABLE colleges ADD COLUMN website VARCHAR(255)");
@@ -350,6 +405,17 @@ async function checkDatabase() {
     await runAlterIfMissing('study_materials', 'course_id', "ALTER TABLE study_materials ADD COLUMN course_id INT AFTER category");
     await runAlterIfMissing('study_materials', 'program_id', "ALTER TABLE study_materials ADD COLUMN program_id INT AFTER course_id");
     await runAlterIfMissing('study_materials', 'subject', "ALTER TABLE study_materials ADD COLUMN subject VARCHAR(100) AFTER program_id");
+    // Section F#2 -- teacher-uploaded YouTube links, and materials targeted
+    // to a specific Batch (not just Course/Program level). Column added
+    // here; the batch_id FK constraint is added further down, after the
+    // `batches` table itself is created (it doesn't exist yet at this point
+    // in the script -- same FK-ordering issue check-db.js already got
+    // bitten by once, see commit b320d5a).
+    await runAlterIfMissing('study_materials', 'video_url', "ALTER TABLE study_materials ADD COLUMN video_url VARCHAR(500) AFTER subject");
+    await runAlterIfMissing('study_materials', 'batch_id', "ALTER TABLE study_materials ADD COLUMN batch_id INT AFTER video_url");
+    // A video-link material has no uploaded document, so file_path (created
+    // NOT NULL, back when every material was a file) has to allow NULL now.
+    try { await connection.query("ALTER TABLE study_materials MODIFY COLUMN file_path VARCHAR(255) NULL"); } catch (e) { console.warn(`⚠️  Could not relax study_materials.file_path to NULL: ${e.message}`); }
 
     // 6. PROGRAMS TABLE
     await connection.query(`
@@ -430,6 +496,10 @@ async function checkDatabase() {
         FOREIGN KEY (mentor_id) REFERENCES faculty(id) ON DELETE SET NULL
       )
     `);
+    // Section F#2 continued -- study_materials.batch_id FK, added here now
+    // that `batches` exists (the column itself was added earlier, next to
+    // course_id/program_id, before this table existed).
+    try { await connection.query("ALTER TABLE study_materials ADD CONSTRAINT fk_material_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL"); } catch (e) {}
 
     // 8. COURSE MODULES & LESSONS
     await connection.query(`
@@ -996,6 +1066,78 @@ async function checkDatabase() {
         UNIQUE KEY unique_campaign_student (campaign_id, student_id)
       )
     `);
+
+    // SYLLABUS TRACKING (master-dev-prompt Section G) -- no structured
+    // syllabus existed before this: live_classes.topic was just free text
+    // per session, no completion tracking, no student confirmation.
+    // Placed here (all referenced tables already exist by this point).
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS syllabus_topics (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        course_id INT NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        order_no INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+      )
+    `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS batch_topic_progress (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        batch_id INT NOT NULL,
+        topic_id INT NOT NULL,
+        status ENUM('not_started', 'in_progress', 'completed') DEFAULT 'not_started',
+        covered_by INT,
+        covered_at DATETIME,
+        live_class_id INT,
+        revision_alert_sent_at DATETIME,
+        FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+        FOREIGN KEY (topic_id) REFERENCES syllabus_topics(id) ON DELETE CASCADE,
+        FOREIGN KEY (covered_by) REFERENCES teachers(id) ON DELETE SET NULL,
+        FOREIGN KEY (live_class_id) REFERENCES live_classes(id) ON DELETE SET NULL,
+        UNIQUE KEY unique_batch_topic (batch_id, topic_id)
+      )
+    `);
+    // One tap per student per topic PER BATCH: Got it / Need revision /
+    // Didn't attend. Deliberately no text field -- keeps it to a single tap
+    // so response rates don't collapse. ON DUPLICATE KEY lets a student
+    // change their tap. The unique key includes batch_id (not just
+    // student_id + topic_id): the same course/topic can be surfaced to a
+    // student through more than one of their batches, and without batch_id
+    // in the key, confirming it for a second batch would silently rewrite
+    // the first batch's row (INSERT ... ON DUPLICATE KEY UPDATE only
+    // touches `confirmation`, not `batch_id`) instead of recording a
+    // separate confirmation -- corrupting which batch's 30%-alert count it
+    // belongs to.
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS topic_confirmations (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        student_id INT NOT NULL,
+        batch_id INT NOT NULL,
+        topic_id INT NOT NULL,
+        confirmation ENUM('got_it', 'need_revision', 'didnt_attend') NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+        FOREIGN KEY (topic_id) REFERENCES syllabus_topics(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_student_batch_topic (student_id, batch_id, topic_id)
+      )
+    `);
+    // Migration for a table created before this fix: swap the old
+    // (student_id, topic_id) unique key for the correct (student_id,
+    // batch_id, topic_id) one. Best-effort/idempotent like every other
+    // schema patch in this file -- a no-op once already applied.
+    try {
+      const [[oldKey]] = await connection.query(`
+        SELECT COUNT(*) AS cnt FROM information_schema.statistics
+        WHERE table_schema = ? AND table_name = 'topic_confirmations' AND index_name = 'unique_student_topic'
+      `, [dbName]);
+      if (oldKey.cnt > 0) {
+        await connection.query('ALTER TABLE topic_confirmations DROP INDEX unique_student_topic');
+      }
+    } catch (e) {}
+    try { await connection.query('ALTER TABLE topic_confirmations ADD UNIQUE KEY unique_student_batch_topic (student_id, batch_id, topic_id)'); } catch (e) {}
 
     console.log('🔄 Inserting default colleges...');
     await connection.query(`

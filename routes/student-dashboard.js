@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const { requireStudent } = require('../middleware/studentAuth');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { sendSms, sendWhatsApp } = require('../lib/notify');
 
 // Assignment submission uploads (PDF/image/doc, 10 MB).
 const submissionUpload = makeUpload({
@@ -132,13 +133,119 @@ router.get('/materials', requireStudent, async (req, res) => {
       LEFT JOIN courses c ON m.course_id = c.id
       LEFT JOIN programs p ON m.program_id = p.id
       WHERE m.is_active = TRUE AND (
-        (m.course_id IS NULL AND m.program_id IS NULL)
+        (m.course_id IS NULL AND m.program_id IS NULL AND m.batch_id IS NULL)
         OR m.course_id  IN (SELECT course_id  FROM student_courses  WHERE student_id = ?)
         OR m.program_id IN (SELECT program_id FROM student_programs WHERE student_id = ?)
+        OR m.batch_id IN (SELECT batch_id FROM student_courses  WHERE student_id = ? AND batch_id IS NOT NULL)
+        OR m.batch_id IN (SELECT batch_id FROM student_programs WHERE student_id = ? AND batch_id IS NOT NULL)
       )
       ORDER BY m.subject IS NULL, m.subject ASC, m.created_at DESC
-    `, [sid, sid]);
+    `, [sid, sid, sid, sid]);
     res.json({ success: true, materials });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// GET /api/student-dashboard/syllabus - topics the teacher has marked
+// completed for any batch this student is in, plus the student's own
+// confirmation tap if they've already made one (Section G item 3).
+router.get('/syllabus', requireStudent, async (req, res) => {
+  const sid = req.user.id;
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const [topics] = await connection.query(`
+      SELECT st.id AS topic_id, st.title, btp.batch_id, btp.covered_at,
+             tc.confirmation
+      FROM batch_topic_progress btp
+      JOIN syllabus_topics st ON st.id = btp.topic_id
+      LEFT JOIN topic_confirmations tc ON tc.topic_id = btp.topic_id AND tc.batch_id = btp.batch_id AND tc.student_id = ?
+      WHERE btp.status = 'completed' AND btp.batch_id IN (
+        SELECT batch_id FROM student_courses  WHERE student_id = ? AND batch_id IS NOT NULL
+        UNION
+        SELECT batch_id FROM student_programs WHERE student_id = ? AND batch_id IS NOT NULL
+      )
+      ORDER BY btp.covered_at DESC
+    `, [sid, sid, sid]);
+    res.json({ success: true, topics });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+// POST /api/student-dashboard/syllabus/:topicId/confirm - the one-tap
+// self-confirmation (🟢 Got it / 🟡 Need revision / ⚪ Didn't attend).
+// Deliberately no text field. When "need revision" crosses ~30% of this
+// topic's confirmations for the first time, the teacher gets a heads-up --
+// catching a weak spot in real time instead of a later result (Section G
+// item 5). notify() calls are fire-and-forget and safe no-ops if the admin
+// hasn't configured an SMS/WhatsApp provider yet.
+router.post('/syllabus/:topicId/confirm', requireStudent, async (req, res) => {
+  const sid = req.user.id;
+  const { batch_id, confirmation } = req.body;
+  if (!['got_it', 'need_revision', 'didnt_attend'].includes(confirmation)) {
+    return res.status(400).json({ error: 'Invalid confirmation.' });
+  }
+  if (!batch_id) return res.status(400).json({ error: 'batch_id is required.' });
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    // Confirm this student is actually in this batch -- don't let a
+    // confirmation be filed against a batch/topic that isn't theirs.
+    const [[enrolled]] = await connection.query(
+      `SELECT 1 AS ok FROM student_courses WHERE student_id = ? AND batch_id = ?
+       UNION SELECT 1 FROM student_programs WHERE student_id = ? AND batch_id = ?`,
+      [sid, batch_id, sid, batch_id]
+    );
+    if (!enrolled) return res.status(403).json({ error: 'Not your batch.' });
+
+    await connection.query(
+      `INSERT INTO topic_confirmations (student_id, batch_id, topic_id, confirmation)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE confirmation = ?`,
+      [sid, batch_id, req.params.topicId, confirmation, confirmation]
+    );
+
+    const [[counts]] = await connection.query(
+      `SELECT COUNT(*) AS total, SUM(confirmation = 'need_revision') AS need_revision
+       FROM topic_confirmations WHERE batch_id = ? AND topic_id = ?`,
+      [batch_id, req.params.topicId]
+    );
+    if (counts.total > 0 && counts.need_revision / counts.total >= 0.3) {
+      // Atomically claim the "send the alert" slot with a single UPDATE
+      // instead of SELECT-then-check-then-UPDATE: two students confirming
+      // "need revision" for the same topic within the same instant would
+      // otherwise both read revision_alert_sent_at as NULL before either
+      // write landed, and the teacher would get paged twice. Only the
+      // request whose UPDATE actually flips a NULL -> NOW() (affectedRows
+      // > 0) goes on to send; every other concurrent request sees 0 rows
+      // affected and skips silently.
+      const [claim] = await connection.query(
+        `UPDATE batch_topic_progress SET revision_alert_sent_at = NOW()
+         WHERE batch_id = ? AND topic_id = ? AND revision_alert_sent_at IS NULL AND covered_by IS NOT NULL`,
+        [batch_id, req.params.topicId]
+      );
+      if (claim.affectedRows > 0) {
+        const [[progress]] = await connection.query(
+          'SELECT covered_by FROM batch_topic_progress WHERE batch_id = ? AND topic_id = ?',
+          [batch_id, req.params.topicId]
+        );
+        const [[teacher]] = await connection.query('SELECT mobile FROM teachers WHERE id = ?', [progress.covered_by]);
+        const [[topic]] = await connection.query('SELECT title FROM syllabus_topics WHERE id = ?', [req.params.topicId]);
+        if (teacher?.mobile) {
+          const msg = `Heads up: ${Math.round((counts.need_revision / counts.total) * 100)}% of students marked "Need revision" for "${topic?.title}". Consider a quick recap.`;
+          sendSms(teacher.mobile, msg);
+          sendWhatsApp(teacher.mobile, msg);
+        }
+      }
+    }
+
+    res.json({ success: true, message: 'Recorded.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {

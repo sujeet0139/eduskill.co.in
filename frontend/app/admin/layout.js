@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Users, GraduationCap, UserCog, BookOpen, Layers, CalendarClock,
   FileText, ClipboardList, Award, School, MapPin, Building2, ImageIcon, Megaphone,
   MessageSquare, Wallet, SlidersHorizontal, Settings, Plus, Bell, Search, Menu, X, LogOut,
-  Link2,
+  Link2, ListChecks,
 } from "lucide-react";
 
 const NAV_GROUPS = [
@@ -34,6 +34,7 @@ const NAV_GROUPS = [
       { href: "/admin/materials", label: "Study Materials", icon: FileText },
       { href: "/admin/assignments", label: "Assignments", icon: ClipboardList },
       { href: "/admin/live-classes", label: "Live Classes", icon: CalendarClock },
+      { href: "/admin/syllabus", label: "Syllabus", icon: ListChecks },
       { href: "/admin/exams", label: "Exams", icon: FileText },
       { href: "/admin/certificates", label: "Certificates", icon: Award },
     ],
@@ -41,6 +42,7 @@ const NAV_GROUPS = [
   {
     title: "Masters",
     items: [
+      { href: "/admin/universities", label: "Universities", icon: School },
       { href: "/admin/colleges", label: "Colleges", icon: School },
       { href: "/admin/districts", label: "Cities / Districts", icon: MapPin },
       { href: "/admin/departments", label: "Departments", icon: Building2 },

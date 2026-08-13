@@ -5,6 +5,12 @@ const { makeUpload, fileUrl } = require('../config/storage');
 const { requireAdmin } = require('../middleware/authMiddleware'); // Already present
 const bcrypt = require('bcryptjs');
 
+// Login-capable staff role that drives the teacher portal (teacher-portal.js
+// authenticates against this table). Referenced as batches.teacher_id. NOT
+// the same role as `faculty` (external experts, no login, batches.mentor_id)
+// -- see ARCHITECTURE-DECISIONS.md ("Faculty vs. Teacher") before building
+// anything that assumes these merge.
+
 // ADMIN: SET / GENERATE a teacher's login password (for the teacher portal).
 // Returns the plaintext ONLY when generated, so the admin can share it.
 router.put('/:id/set-password', requireAdmin, async (req, res) => {

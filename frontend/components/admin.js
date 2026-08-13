@@ -35,6 +35,31 @@ export function TableWrap({ children }) {
   );
 }
 
+// Shared client-side pagination control (Admin UX Standard, Section A#4 --
+// "every list view gets... pagination", previously only the Students list
+// had this, and it was a bespoke inline implementation there). For lists
+// small enough that the backend already returns everything in one response
+// (Materials, Campaigns), slicing client-side here is simpler than adding
+// server-side paging to those endpoints too.
+export function Pagination({ page, pageSize, total, onPageChange }) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (total === 0) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+      <span>Showing {from}–{to} of {total}</span>
+      <div className="flex items-center gap-2">
+        <button disabled={page <= 1} onClick={() => onPageChange(page - 1)}
+          className="rounded-lg border-2 border-gray-200 px-3 py-1 disabled:opacity-40">Prev</button>
+        <span>Page {page} of {totalPages}</span>
+        <button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}
+          className="rounded-lg border-2 border-gray-200 px-3 py-1 disabled:opacity-40">Next</button>
+      </div>
+    </div>
+  );
+}
+
 export function Th({ children, className = "" }) {
   return <th className={`whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 ${className}`}>{children}</th>;
 }

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { resolveStateId } = require('../lib/states');
 
 // GET ALL DISTRICTS (optionally ?state= for the State -> District cascade)
 router.get('/', async (req, res) => {
@@ -26,13 +27,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET distinct states -- for the State dropdown itself.
+// GET states -- for the State dropdown itself. Sourced from the seeded
+// `states` reference table (Section C#1), not `SELECT DISTINCT state FROM
+// districts` -- that only ever showed states someone happened to add a
+// district for, and let casing drift ("bihar"/"BIHAR") fragment the list.
 router.get('/states', async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
-    const [rows] = await connection.query('SELECT DISTINCT state FROM districts ORDER BY state ASC');
-    res.json({ success: true, states: rows.map((r) => r.state) });
+    const [rows] = await connection.query('SELECT name FROM states ORDER BY name ASC');
+    res.json({ success: true, states: rows.map((r) => r.name) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   } finally {
@@ -56,13 +60,15 @@ router.get('/:id/colleges', async (req, res) => {
 
 // CREATE NEW DISTRICT
 router.post('/', async (req, res) => {
-  const { name, code } = req.body;
+  const { name, code, state } = req.body;
   let connection;
   try {
     connection = await pool.getConnection();
+    const stateName = state || 'Bihar';
+    const stateId = await resolveStateId(connection, stateName);
     await connection.query(
-      'INSERT INTO districts (name, code) VALUES (?, ?)',
-      [name, code]
+      'INSERT INTO districts (name, code, state, state_id) VALUES (?, ?, ?, ?)',
+      [name, code, stateName, stateId]
     );
     res.json({ success: true, message: 'District added successfully' });
   } catch (error) {
@@ -74,13 +80,20 @@ router.post('/', async (req, res) => {
 
 // UPDATE DISTRICT
 router.put('/:id', async (req, res) => {
-  const { name, code } = req.body;
+  const { name, code, state } = req.body;
   let connection;
   try {
     connection = await pool.getConnection();
+    // Only fall back to 'Bihar' on CREATE. On UPDATE, a caller that omits
+    // `state` (an older cached frontend bundle mid-deploy, a script, a
+    // direct API call) must not silently blow away a district's real,
+    // already-correct state -- so fall back to the existing value instead.
+    const [[existing]] = await connection.query('SELECT state FROM districts WHERE id = ?', [req.params.id]);
+    const stateName = state || existing?.state || 'Bihar';
+    const stateId = await resolveStateId(connection, stateName);
     await connection.query(
-      'UPDATE districts SET name=?, code=? WHERE id=?',
-      [name, code, req.params.id]
+      'UPDATE districts SET name=?, code=?, state=?, state_id=? WHERE id=?',
+      [name, code, stateName, stateId, req.params.id]
     );
     res.json({ success: true, message: 'District updated successfully' });
   } catch (error) {

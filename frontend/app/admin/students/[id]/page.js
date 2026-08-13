@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { adminAuth } from "@/lib/auth";
 import { Button, Card, StatusBadge, Alert, Select } from "@/components/ui";
 import { PageHeader, TableWrap, Th, Td } from "@/components/admin";
-import { User, Banknote, BookOpen, FileText, GraduationCap } from "lucide-react";
+import { User, Banknote, BookOpen, FileText, GraduationCap, TrendingUp } from "lucide-react";
 import { useToast } from "@/components/Toast";
 
 const DetailItem = ({ label, value, children }) => (
@@ -46,6 +46,7 @@ export default function StudentProfilePage() {
   const [eduFile, setEduFile] = useState(null);
   const [eduSaving, setEduSaving] = useState(false);
   const [eduError, setEduError] = useState("");
+  const [progressData, setProgressData] = useState(null);
 
   const token = () => adminAuth.token();
   const notify = useToast();
@@ -73,6 +74,7 @@ export default function StudentProfilePage() {
     api.get("/api/courses", token()).then((d) => setAllCourses(d.courses || [])).catch(() => {});
     api.get("/api/programs", token()).then((d) => setAllPrograms(d.programs || [])).catch(() => {});
     api.get("/api/batches", token()).then((d) => setAllBatches(d.batches || [])).catch(() => {});
+    api.get(`/api/progress/students/${studentId}`, token()).then(setProgressData).catch(() => {});
   }, [studentId]);
 
   const doEnroll = async (type, item_id, batch_id, status) => {
@@ -180,6 +182,7 @@ export default function StudentProfilePage() {
     { id: "payments", label: "Payments", icon: Banknote },
     { id: "courses", label: "Enrollments", icon: BookOpen },
     { id: "documents", label: "Documents", icon: FileText },
+    { id: "progress", label: "Progress", icon: TrendingUp },
   ];
 
   return (
@@ -457,6 +460,38 @@ export default function StudentProfilePage() {
                 )) : <tr><Td colSpan="4" className="text-center">No documents uploaded.</Td></tr>}
               </tbody>
             </TableWrap>
+          </Card>
+        )}
+
+        {activeTab === "progress" && (
+          <Card>
+            <h3 className="mb-4 text-lg font-semibold">Progress Rollup</h3>
+            {!progressData ? (
+              <p className="text-sm text-gray-500">Loading…</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="rounded-xl border border-gray-200 p-4">
+                  <p className="text-xs text-gray-500">Attendance</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900">{progressData.attendance.pct != null ? `${progressData.attendance.pct}%` : "—"}</p>
+                  <p className="mt-0.5 text-xs text-gray-400">{progressData.attendance.present} of {progressData.attendance.total} sessions</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 p-4">
+                  <p className="text-xs text-gray-500">Assignment Average</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900">{progressData.assignments.avgPct != null ? `${progressData.assignments.avgPct}%` : "—"}</p>
+                  <p className="mt-0.5 text-xs text-gray-400">{progressData.assignments.graded} graded</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 p-4">
+                  <p className="text-xs text-gray-500">Syllabus Self-Confirmation</p>
+                  {progressData.syllabus.total === 0 ? (
+                    <p className="mt-1 text-sm text-gray-400">No confirmations yet.</p>
+                  ) : (
+                    <p className="mt-1 text-sm text-gray-800">
+                      🟢 {progressData.syllabus.got_it} · 🟡 {progressData.syllabus.need_revision} · ⚪ {progressData.syllabus.didnt_attend}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </Card>
         )}
       </div>

@@ -9,6 +9,10 @@ node_modules/
 # Uploaded files (local-disk dev only; production uses Cloudinary)
 uploads/
 
+# DB backup dumps (scripts/backup-db.sh output) -- contain real student PII,
+# never belongs in git.
+/backups/
+
 # Vercel
 .vercel/
 

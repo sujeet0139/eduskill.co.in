@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { makeUpload, fileUrl } = require('../config/storage');
+const { requireRole } = require('../middleware/authMiddleware');
 
 const qrUpload = makeUpload({
   folder: 'eduskill/settings',
@@ -31,8 +32,12 @@ router.post('/upload-qr', qrUpload.single('qr'), async (req, res) => {
   }
 });
 
-// GET ALL SETTINGS
-router.get('/', async (req, res) => {
+// GET ALL SETTINGS -- also "system config" (master-dev-prompt Section H#2):
+// this includes sms_url_template/whatsapp_url_template, which embed the
+// SMS/WhatsApp provider's API key/token in the URL (see lib/notify.js).
+// Restricting only the PUT and leaving GET open would still let the
+// Admin/Data-Entry-Staff tier ('moderator') read those secrets.
+router.get('/', requireRole('admin'), async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
@@ -52,8 +57,10 @@ router.get('/', async (req, res) => {
   }
 });
 
-// BULK UPDATE SETTINGS
-router.put('/', async (req, res) => {
+// BULK UPDATE SETTINGS -- this is exactly the "system config" the
+// Admin/Data-Entry-Staff tier ('moderator') shouldn't reach (master-dev-
+// prompt Section H#2); SMS/WhatsApp provider config lives here.
+router.put('/', requireRole('admin'), async (req, res) => {
   const settingsToUpdate = req.body;
   let connection;
   try {
