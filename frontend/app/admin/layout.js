@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { adminAuth } from "@/lib/auth";
@@ -76,6 +77,18 @@ const CREATE_LINKS = [
   { href: "/admin/assignments", label: "New Assignment" },
 ];
 
+function BrandLogo({ compact = false }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`flex items-start justify-center overflow-hidden rounded-full bg-white ring-1 ring-blue-100 ${compact ? "h-8 w-8" : "h-9 w-9"}`}>
+        <Image src="/eduskill-logo.png" alt="EduSkill" width={compact ? 64 : 72} height={compact ? 64 : 72} className="max-w-none -translate-y-1.5" priority />
+      </span>
+      <span className={`${compact ? "text-base" : "text-lg"} font-extrabold text-gray-900`}>edu<span className="text-orange-500">Skill</span></span>
+      <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-bold text-white">admin</span>
+    </div>
+  );
+}
+
 function NavList({ pathname, onNavigate }) {
   return (
     <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
@@ -144,8 +157,7 @@ export default function AdminLayout({ children }) {
         {/* Desktop sidebar */}
         <aside className="hidden w-60 shrink-0 flex-col border-r border-gray-200 bg-white md:flex">
           <Link href="/admin" className="flex items-center gap-2 border-b border-gray-100 px-5 py-4">
-            <span className="text-lg font-extrabold text-gray-900">eduskill</span>
-            <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-bold text-white">admin</span>
+            <BrandLogo />
           </Link>
           <NavList pathname={pathname} />
         </aside>
@@ -156,7 +168,7 @@ export default function AdminLayout({ children }) {
             <div className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} />
             <aside className="absolute left-0 top-0 flex h-full w-64 flex-col bg-white shadow-xl">
               <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-                <span className="text-lg font-extrabold text-gray-900">eduskill <span className="text-brand">admin</span></span>
+                <BrandLogo compact />
                 <button onClick={() => setDrawer(false)}><X size={20} className="text-gray-500" /></button>
               </div>
               <NavList pathname={pathname} onNavigate={() => setDrawer(false)} />

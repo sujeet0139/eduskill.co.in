@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { studentAuth } from "@/lib/auth";
@@ -9,6 +10,7 @@ const LINKS = [
   { href: "/", label: "Home" },
   { href: "/#courses", label: "Programs & Courses" },
   { href: "/materials", label: "Study Material" },
+  { href: "/tools", label: "Visibility Tools" },
   { href: "/contact", label: "Contact" },
 ];
 
@@ -23,8 +25,11 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-30 border-b border-gray-100 bg-white/90 backdrop-blur">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href="/" className="text-xl font-extrabold text-brand">
-          eduskill<span className="text-gray-900">.co.in</span>
+        <Link href="/" className="flex items-center gap-2" aria-label="EduSkill home">
+          <span className="flex h-9 w-9 items-start justify-center overflow-hidden rounded-full bg-white ring-1 ring-blue-100">
+            <Image src="/eduskill-logo.png" alt="" width={72} height={72} className="max-w-none -translate-y-1.5" priority />
+          </span>
+          <span className="text-xl font-extrabold text-brand">edu<span className="text-orange-500">Skill</span><span className="text-gray-900">.co.in</span></span>
         </Link>
 
         {/* Desktop links */}
